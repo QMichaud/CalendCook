@@ -1,0 +1,1122 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#FDF6F0">
+<title>Mes Recettes — Calendrier &amp; Courses</title>
+<style>
+  :root{
+    --cream:#FDF6F0;
+    --cream-2:#F7E9E1;
+    --rose:#E9A6B4;
+    --rose-dark:#D98A9C;
+    --rose-deep:#B96A7E;
+    --rose-soft:#FBECEF;
+    --ink:#4A3B3C;
+    --ink-soft:#8A7376;
+    --white:#FFFFFF;
+    --line:#F0DFD8;
+    --shadow:0 2px 10px rgba(199,150,160,.14);
+    --radius:18px;
+    --safe:env(safe-area-inset-bottom, 0px);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    background:var(--cream);
+    color:var(--ink);
+    font-size:16px;
+    line-height:1.45;
+    overscroll-behavior-y:none;
+  }
+  button{font-family:inherit;font-size:inherit;color:inherit}
+  input,select,textarea{font-family:inherit;font-size:16px}
+
+  /* ---------- Header ---------- */
+  header.app{
+    position:sticky;top:0;z-index:20;
+    background:linear-gradient(180deg,var(--white),var(--cream));
+    border-bottom:1px solid var(--line);
+    padding:14px 16px 10px;
+    padding-top:calc(14px + env(safe-area-inset-top,0px));
+  }
+  .brand{display:flex;align-items:center;gap:10px}
+  .brand .dot{width:12px;height:12px;border-radius:50%;background:var(--rose);box-shadow:0 0 0 5px var(--rose-soft)}
+  .brand h1{font-size:18px;margin:0;font-weight:650;letter-spacing:.2px}
+  .brand small{display:block;font-size:11.5px;color:var(--ink-soft);font-weight:400;letter-spacing:.3px}
+
+  /* ---------- Nav ---------- */
+  nav.tabs{
+    position:fixed;bottom:0;left:0;right:0;z-index:30;
+    display:flex;background:rgba(255,255,255,.94);
+    backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+    border-top:1px solid var(--line);
+    padding-bottom:var(--safe);
+  }
+  nav.tabs button{
+    flex:1;border:0;background:none;padding:9px 4px 8px;
+    display:flex;flex-direction:column;align-items:center;gap:3px;
+    font-size:10.5px;letter-spacing:.2px;color:var(--ink-soft);
+    cursor:pointer;transition:color .15s;
+  }
+  nav.tabs button svg{width:22px;height:22px;stroke-width:1.7}
+  nav.tabs button.on{color:var(--rose-deep)}
+  nav.tabs button.on svg{stroke:var(--rose-deep)}
+
+  main{padding:16px 14px calc(96px + var(--safe));max-width:640px;margin:0 auto}
+  .view{display:none}
+  .view.on{display:block;animation:fade .18s ease}
+  @keyframes fade{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}
+
+  /* ---------- Cards / sections ---------- */
+  .card{
+    background:var(--white);border:1px solid var(--line);border-radius:var(--radius);
+    padding:14px;margin-bottom:14px;box-shadow:var(--shadow);
+  }
+  h2.sec{font-size:14px;margin:2px 0 12px;font-weight:650;letter-spacing:.4px;text-transform:uppercase;color:var(--rose-deep)}
+  .muted{color:var(--ink-soft);font-size:13.5px}
+  .empty{
+    text-align:center;color:var(--ink-soft);font-size:14px;
+    padding:26px 14px;border:1.5px dashed var(--line);border-radius:14px;background:var(--cream);
+  }
+
+  /* ---------- Buttons ---------- */
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:7px;
+    border:0;border-radius:13px;padding:12px 16px;font-size:15px;font-weight:600;
+    background:var(--rose);color:#fff;cursor:pointer;transition:transform .08s,background .15s;
+  }
+  .btn:active{transform:scale(.975)}
+  .btn.block{width:100%}
+  .btn.ghost{background:var(--rose-soft);color:var(--rose-deep)}
+  .btn.line{background:transparent;border:1.5px solid var(--line);color:var(--ink-soft)}
+  .btn.sm{padding:8px 12px;font-size:13.5px;border-radius:11px}
+  .btn.danger{background:#fff;color:#C0586C;border:1.5px solid #F3D7DC}
+  .row{display:flex;gap:9px;align-items:center}
+  .row.wrap{flex-wrap:wrap}
+
+  /* ---------- Week navigator ---------- */
+  .weeknav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px}
+  .weeknav .lab{text-align:center;flex:1;min-width:0}
+  .weeknav .lab b{display:block;font-size:16px;font-weight:650}
+  .weeknav .lab span{font-size:12px;color:var(--ink-soft)}
+  .iconbtn{
+    width:40px;height:40px;flex:none;border-radius:13px;border:1px solid var(--line);
+    background:var(--white);display:flex;align-items:center;justify-content:center;cursor:pointer;
+  }
+  .iconbtn:active{background:var(--rose-soft)}
+  .iconbtn svg{width:19px;height:19px;stroke:var(--rose-deep);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+
+  .day{
+    background:var(--white);border:1px solid var(--line);border-radius:16px;
+    margin-bottom:10px;overflow:hidden;box-shadow:var(--shadow);
+  }
+  .day.today{border-color:var(--rose);box-shadow:0 0 0 3px var(--rose-soft)}
+  .day-h{
+    display:flex;align-items:center;gap:8px;padding:10px 13px;
+    border-bottom:1px solid var(--line);background:linear-gradient(180deg,var(--white),var(--cream));
+  }
+  .day-h .dname{font-weight:650;font-size:14.5px;flex:1}
+  .day-h .dnum{font-size:12px;color:var(--ink-soft)}
+  .badge{
+    font-size:10.5px;background:var(--rose);color:#fff;border-radius:8px;
+    padding:2px 7px;font-weight:600;letter-spacing:.2px;
+  }
+  .slots{padding:9px 11px 6px}
+  .slot{margin-bottom:7px}
+  .slot:last-child{margin-bottom:3px}
+  .slot-t{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--ink-soft);margin:2px 0 5px 2px;font-weight:600}
+  .chip{
+    display:flex;align-items:center;gap:8px;background:var(--rose-soft);
+    border:1px solid #F6DDE3;border-radius:12px;padding:8px 10px;margin-bottom:6px;
+  }
+  .chip .nm{flex:1;min-width:0;font-size:14px;font-weight:550;overflow-wrap:anywhere}
+  .chip .tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:3px}
+  .tag{
+    display:inline-block;font-size:10.5px;background:var(--white);color:var(--rose-deep);
+    border:1px solid #F3D3DA;border-radius:7px;padding:1px 6px;font-weight:600;
+  }
+  .x{
+    border:0;background:transparent;color:var(--ink-soft);cursor:pointer;
+    width:28px;height:28px;flex:none;border-radius:9px;font-size:17px;line-height:1;
+  }
+  .x:active{background:#fff}
+  .addmini{
+    width:100%;border:1.5px dashed var(--line);background:var(--cream);border-radius:12px;
+    padding:8px;font-size:13px;color:var(--rose-deep);font-weight:600;cursor:pointer;margin-bottom:6px;
+  }
+
+  /* ---------- Recipes ---------- */
+  .rlist{display:flex;flex-direction:column;gap:10px}
+  .rec{
+    background:var(--white);border:1px solid var(--line);border-radius:16px;
+    padding:13px;box-shadow:var(--shadow);cursor:pointer;
+  }
+  .rec:active{background:var(--cream)}
+  .rec h3{margin:0 0 4px;font-size:16px;font-weight:650;overflow-wrap:anywhere}
+  .rec .meta{font-size:12.5px;color:var(--ink-soft);display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .rec .ing{margin-top:7px;font-size:13px;color:var(--ink-soft);overflow-wrap:anywhere}
+
+  /* ---------- Forms ---------- */
+  label.f{display:block;font-size:12.5px;font-weight:600;color:var(--ink-soft);margin:12px 0 5px;letter-spacing:.2px}
+  label.f:first-child{margin-top:0}
+  input[type=text],input[type=number],input[type=search],select,textarea{
+    width:100%;padding:11px 12px;border:1.5px solid var(--line);border-radius:12px;
+    background:var(--cream);color:var(--ink);outline:none;transition:border-color .15s,background .15s;
+  }
+  input:focus,select:focus,textarea:focus{border-color:var(--rose);background:var(--white)}
+  .grid2{display:grid;grid-template-columns:1fr 96px;gap:8px}
+  .ingline{display:grid;grid-template-columns:1fr 60px 82px 32px;gap:6px;margin-bottom:7px;align-items:center}
+  .ingline input[type=number]{padding:11px 8px;text-align:center}
+  .ingline select{padding:11px 4px;text-align:center}
+  .ingline .x{width:32px;height:32px}
+  .tagbox{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .tagpick{
+    border:1.5px solid var(--line);background:var(--white);border-radius:10px;
+    padding:5px 10px;font-size:12.5px;cursor:pointer;font-weight:600;color:var(--ink-soft);
+  }
+  .tagpick.on{background:var(--rose);border-color:var(--rose);color:#fff}
+  .tagpick .cnt{opacity:.65;font-weight:400}
+
+  /* ---------- Search ---------- */
+  .searchwrap{position:relative;margin-bottom:12px}
+  .searchwrap input{padding-left:36px}
+  .searchwrap svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:17px;height:17px;stroke:var(--ink-soft);fill:none;stroke-width:2}
+
+  /* ---------- Modal ---------- */
+  .modal{
+    position:fixed;inset:0;z-index:50;display:none;
+    background:rgba(74,59,60,.42);backdrop-filter:blur(3px);
+    align-items:flex-end;justify-content:center;
+  }
+  .modal.on{display:flex}
+  .sheet{
+    background:var(--cream);width:100%;max-width:640px;max-height:92vh;overflow-y:auto;
+    border-radius:22px 22px 0 0;padding:8px 16px calc(22px + var(--safe));
+    animation:up .22s cubic-bezier(.2,.8,.3,1);
+  }
+  @keyframes up{from{transform:translateY(24px);opacity:.6}to{transform:none;opacity:1}}
+  .grab{width:40px;height:4px;border-radius:3px;background:var(--line);margin:8px auto 14px}
+  .sheet h2{margin:0 0 14px;font-size:18px;font-weight:650}
+  .sheet .foot{display:flex;gap:9px;margin-top:18px}
+  .sheet .foot .btn{flex:1}
+
+  /* ---------- Shopping ---------- */
+  .shopitem{
+    display:flex;align-items:center;gap:10px;padding:9px 4px;border-bottom:1px solid var(--line);
+  }
+  .shopitem:last-child{border-bottom:0}
+  .ck{
+    width:24px;height:24px;flex:none;border-radius:8px;border:1.5px solid var(--line);
+    background:var(--white);cursor:pointer;display:flex;align-items:center;justify-content:center;
+  }
+  .ck.on{background:var(--rose);border-color:var(--rose)}
+  .ck svg{width:14px;height:14px;stroke:#fff;stroke-width:3;fill:none;stroke-linecap:round;stroke-linejoin:round;display:none}
+  .ck.on svg{display:block}
+  .shopitem .txt{flex:1;min-width:0;overflow-wrap:anywhere}
+  .shopitem .txt small{display:block;font-size:11.5px;color:var(--ink-soft)}
+  .shopitem.done .txt{text-decoration:line-through;color:var(--ink-soft);opacity:.7}
+  .ingrow{display:flex;gap:9px;padding:7px 4px;border-bottom:1px dashed var(--line);font-size:14px}
+  .ingrow:last-child{border-bottom:0}
+  .ingrow .q{font-weight:650;color:var(--rose-deep);white-space:nowrap}
+
+  /* ---------- Toast ---------- */
+  #toast{
+    position:fixed;left:50%;bottom:calc(84px + var(--safe));transform:translate(-50%,14px);
+    background:var(--ink);color:#fff;padding:10px 16px;border-radius:12px;font-size:13.5px;
+    opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:60;max-width:88vw;text-align:center;
+  }
+  #toast.on{opacity:1;transform:translate(-50%,0)}
+  .pill{
+    display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;
+    border-radius:9px;padding:4px 9px;background:var(--rose-soft);color:var(--rose-deep);
+  }
+  .pill.cloud{background:#EAF4EC;color:#4E7A57}
+  .pill.local{background:#FBF1E4;color:#9A7238}
+  .whobtn{
+    width:100%;text-align:left;border:1.5px dashed var(--line);background:var(--cream);
+    border-radius:10px;padding:5px 9px;font-size:11.5px;color:var(--ink-soft);font-weight:600;cursor:pointer;
+    margin-top:5px;
+  }
+  .whobtn.set{border-style:solid;border-color:#F3D3DA;background:var(--white);color:var(--rose-deep)}
+  .whopill{
+    display:inline-block;font-size:10px;font-weight:700;background:var(--rose-deep);color:#fff;
+    border-radius:7px;padding:1px 7px;margin-right:5px;vertical-align:1px;
+  }
+  details.help summary{cursor:pointer;font-size:13.5px;font-weight:600;color:var(--rose-deep);padding:4px 0}
+  details.help code{font-size:12px;background:var(--cream-2);padding:1px 5px;border-radius:6px;overflow-wrap:anywhere}
+  details.help pre{background:var(--cream-2);padding:10px;border-radius:10px;overflow-x:auto;font-size:11.5px;line-height:1.5}
+</style>
+</head>
+<body>
+
+<header class="app">
+  <div class="brand">
+    <span class="dot"></span>
+    <div>
+      <h1>Mes Recettes</h1>
+      <small>Calendrier · Catalogue · Liste de courses</small>
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <!-- ================= CALENDRIER ================= -->
+  <section class="view on" id="v-cal">
+    <div class="card">
+      <div class="weeknav">
+        <button class="iconbtn" id="prevW" aria-label="Semaine précédente">
+          <svg viewBox="0 0 24 24"><polyline points="15 5 8 12 15 19"/></svg>
+        </button>
+        <div class="lab">
+          <b id="wLabel">Semaine —</b>
+          <span id="wRange"></span>
+        </div>
+        <button class="iconbtn" id="nextW" aria-label="Semaine suivante">
+          <svg viewBox="0 0 24 24"><polyline points="9 5 16 12 9 19"/></svg>
+        </button>
+      </div>
+      <div class="row">
+        <button class="btn ghost sm" id="todayBtn">Cette semaine</button>
+        <button class="btn ghost sm" id="pickWeekBtn">Choisir</button>
+        <button class="btn ghost sm" id="eatersBtn">Pour qui ?</button>
+        <span style="flex:1"></span>
+        <span class="pill" id="wCount">0 plat</span>
+      </div>
+    </div>
+
+    <div id="weekDays"></div>
+
+    <button class="btn block" id="weekToCart" style="margin-bottom:14px">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><path d="M6 6h15l-1.5 9h-12z"/><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M6 6 5 3H2"/></svg>
+      Liste de courses de cette semaine
+    </button>
+  </section>
+
+  <!-- ================= RECETTES ================= -->
+  <section class="view" id="v-rec">
+    <button class="btn block" id="newRec" style="margin-bottom:14px">+ Nouvelle recette</button>
+    <div class="searchwrap">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
+      <input type="search" id="qRec" placeholder="Rechercher une recette…">
+    </div>
+    <div class="tagbox" id="recTags" style="margin-bottom:14px"></div>
+    <div class="rlist" id="recList"></div>
+  </section>
+
+  <!-- ================= COURSES ================= -->
+  <section class="view" id="v-shop">
+    <div class="card">
+      <div class="row" style="gap:8px">
+        <input type="text" id="newItem" placeholder="Ajouter un produit…" autocomplete="off">
+        <button class="btn sm" id="addItem" style="flex:none">Ajouter</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 class="sec">Import depuis le calendrier</h2>
+      <label class="f">Semaine</label>
+      <div class="row">
+        <button class="iconbtn" id="prevW2" aria-label="Semaine précédente">
+          <svg viewBox="0 0 24 24"><polyline points="15 5 8 12 15 19"/></svg>
+        </button>
+        <select id="impWeek" style="flex:1"></select>
+        <button class="iconbtn" id="nextW2" aria-label="Semaine suivante">
+          <svg viewBox="0 0 24 24"><polyline points="9 5 16 12 9 19"/></svg>
+        </button>
+      </div>
+      <div id="impPreview" style="margin-top:12px"></div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between;margin-bottom:6px">
+        <h2 class="sec" style="margin:0">Ma liste</h2>
+        <button class="btn line sm" id="clearDone">Vider les cochés</button>
+      </div>
+      <div id="shopList"></div>
+    </div>
+  </section>
+
+</main>
+
+<nav class="tabs">
+  <button data-v="cal" class="on">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="3"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>
+    Calendrier
+  </button>
+  <button data-v="rec">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h13a2 2 0 0 1 2 2v14H6a2 2 0 0 1-2-2z"/><path d="M7 8h9M7 12h9M7 16h5"/></svg>
+    Recettes
+  </button>
+  <button data-v="shop">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round"><path d="M3 4h2l2.4 11h11L21 7H6"/><circle cx="9.5" cy="19" r="1.4"/><circle cx="17.5" cy="19" r="1.4"/></svg>
+    Courses
+  </button>
+</nav>
+
+<div class="modal" id="modal"><div class="sheet" id="sheet"></div></div>
+<div id="toast"></div>
+
+<script>
+/* ============================================================
+   DONNÉES
+   ============================================================ */
+const LS = 'mesrecettes.v1';
+
+const DAYS = ['Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi','Dimanche'];
+const SLOTS = [{k:'midi',l:'Midi'},{k:'soir',l:'Soir'}];
+
+/* unités de mesure proposées dans le formulaire de recette */
+const UNITS = [
+  {k:'g',   l:'g'},
+  {k:'kg',  l:'kg'},
+  {k:'mg',  l:'mg'},
+  {k:'ml',  l:'ml'},
+  {k:'cl',  l:'cl'},
+  {k:'l',   l:'L'},
+  {k:'cc',  l:'c. à c.'},
+  {k:'cs',  l:'c. à s.'},
+  {k:'pcs', l:'pièce'},
+  {k:'tranche', l:'tranche'},
+  {k:'gousse',  l:'gousse'},
+  {k:'pincee',  l:'pincée'},
+  {k:'sachet',  l:'sachet'},
+  {k:'boite',   l:'boîte'},
+  {k:'botte',   l:'botte'},
+  {k:'',    l:'—'}          // aucune unité (ex. « 2 œufs »)
+];
+
+/* libellé complet d'une quantité : « 200 g », « 3 pièces », « 2 » */
+function qtyLabel(q, u){
+  const val = (q === '' || q === null || q === undefined || isNaN(q)) ? '' : q;
+  const unit = UNITS.find(x=>x.k === (u||''));
+  const short = !u || u === 'pcs' ? '' : (unit ? unit.l : u);
+  return [val, short].filter(Boolean).join(' ');
+}
+
+let state = { recipes:[], plan:{}, shopping:[], eaters:[] };
+
+/* ---------- petites utilitaires ---------- */
+const $  = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+const uid = () => Math.random().toString(36).slice(2,10) + Date.now().toString(36).slice(-4);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function toast(msg){
+  const t = $('#toast'); t.textContent = msg; t.classList.add('on');
+  clearTimeout(t._t); t._t = setTimeout(()=>t.classList.remove('on'), 2000);
+}
+function fmtDate(d){
+  return d.toLocaleDateString('fr-FR',{day:'numeric',month:'short'});
+}
+/* --- date ISO locale (pas de décalage UTC) --- */
+function isoOf(d){
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+/* --- numéro de semaine ISO 8601 --- */
+function isoWeek(date){
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const day = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - day);
+  const y0 = new Date(Date.UTC(d.getUTCFullYear(),0,1));
+  return { week: Math.ceil((((d - y0)/86400000)+1)/7), year: d.getUTCFullYear() };
+}
+/* --- lundi de la semaine ISO "week" de l'année "year" --- */
+function mondayOfWeek(year, week){
+  const jan4 = new Date(year, 0, 4);
+  const dow = (jan4.getDay() || 7);
+  const mon = new Date(year, 0, 4 - dow + 1);
+  mon.setDate(mon.getDate() + (week - 1) * 7);
+  mon.setHours(0,0,0,0);
+  return mon;
+}
+function addDays(d, n){
+  const x = new Date(d); x.setDate(x.getDate()+n); x.setHours(0,0,0,0); return x;
+}
+function weekDates(anchor){                    // 7 dates, lundi -> dimanche
+  const { week, year } = isoWeek(anchor);
+  const mon = mondayOfWeek(year, week);
+  return DAYS.map((_,i)=> addDays(mon, i));
+}
+function grouped(arr, fn){                     // regroupe une liste par clé
+  const m = {}; for (const x of arr){ const k = fn(x); (m[k] = m[k] || []).push(x); } return m;
+}
+let ANCHOR = new Date(); ANCHOR.setHours(0,0,0,0);
+
+/* ---------- stockage : local + Supabase (optionnel) ---------- */
+const store = {
+  local(){
+    try{ state = JSON.parse(localStorage.getItem(LS)) || { recipes:[], plan:{}, shopping:[], eaters:[] }; }
+    catch(e){ state = { recipes:[], plan:{}, shopping:[], eaters:[] }; }
+    state.recipes  = state.recipes  || [];
+    state.plan     = state.plan     || {};
+    state.shopping = state.shopping || [];
+    state.eaters   = state.eaters   || [];
+  },
+  saveLocal(){ localStorage.setItem(LS, JSON.stringify(state)); },
+  save(){
+    this.saveLocal();
+    if (cloud.on) cloud.put();
+  }
+};
+
+/* ============================================================
+   SYNCHRONISATION MULTI-APPAREILS (Supabase — optionnel)
+   ------------------------------------------------------------
+   Renseigne les deux constantes ci-dessous pour que plusieurs
+   appareils partagent les mêmes données.
+   ============================================================ */
+const SUPABASE_URL = '';        // ex. https://xxxxxxxx.supabase.co
+const SUPABASE_KEY = '';        // clé publique « anon »
+const ROOM = 'notre-foyer';     // doit être identique sur tous les appareils
+
+const cloud = {
+  on: false, timer:null, applying:false,
+  headers(){
+    return { 'apikey':SUPABASE_KEY, 'Authorization':'Bearer '+SUPABASE_KEY, 'Content-Type':'application/json' };
+  },
+  base(){ return SUPABASE_URL.replace(/\/+$/,'') + '/rest/v1/recettes_app?id=eq.' + encodeURIComponent(ROOM); },
+  async pull(){
+    const r = await fetch(this.base()+'&select=data', { headers:this.headers() });
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const rows = await r.json();
+    if(rows.length && rows[0].data){
+      this.applying = true;
+      state = Object.assign({recipes:[],plan:{},shopping:[]}, rows[0].data);
+      store.saveLocal();
+      this.applying = false;
+      render();
+    } else {
+      await this.put();                       // premier appareil : on publie l'existant
+    }
+  },
+  async put(){
+    clearTimeout(this.timer);
+    this.timer = setTimeout(async ()=>{
+      try{
+        await fetch(SUPABASE_URL.replace(/\/+$/,'') + '/rest/v1/recettes_app', {
+          method:'POST',
+          headers: Object.assign(this.headers(), { 'Prefer':'resolution=merge-duplicates' }),
+          body: JSON.stringify([{ id: ROOM, data: state, updated_at: new Date().toISOString() }])
+        });
+      }catch(e){ /* hors ligne : l'état local reste valable */ }
+    }, 700);
+  },
+  async init(){
+    if(!SUPABASE_URL || !SUPABASE_KEY) return;
+    try{ await this.pull(); this.on = true; }
+    catch(e){ this.on = false; toast('Synchronisation indisponible — données enregistrées localement'); }
+    paintSync();
+  }
+};
+function addLoop(){ $$('.view').forEach(v=>v.classList.remove('on')); $('#v-' + b.dataset.v).classList.add('on'); }
+
+/* ============================================================
+   OUTILS "RECETTES DANS LE PLAN"
+   ============================================================ */
+function recipesOfDay(dateKey){
+  const day = state.plan[dateKey] || {};
+  return SLOTS.flatMap(s => (day[s.k]||[]));
+}
+function recipesOfWeek(anchor){
+  return weekDates(anchor).flatMap(d => recipesOfDay(isoOf(d)));
+}
+function findRecipe(id){ return state.recipes.find(r => r.id === id); }
+/* un plat du plan est un id (ancien format) ou { id, who } */
+function eidOf(e){ return typeof e === 'string' ? e : (e && e.id); }
+function whoOf(e){ return (e && typeof e === 'object' && e.who) ? e.who : ''; }
+/* convertit les anciens plats (id nu, ou entrée sans id) au format { id, who } */
+function migrer(){
+  let changed = false;
+  Object.keys(state.plan).forEach(k=>{
+    const day = state.plan[k] || {};
+    SLOTS.forEach(s=>{
+      const list = day[s.k];
+      if(Array.isArray(list)){
+        const clean = list.map(e=>{
+          if(typeof e === 'string'){ changed = true; return { id:e, who:'' }; }
+          if(e && e.id) return { id:e.id, who:e.who||'' };
+          changed = true; return null;
+        }).filter(Boolean);
+        day[s.k] = clean;
+      } else {
+        day[s.k] = [];
+      }
+    });
+    state.plan[k] = day;
+  });
+  if(changed) localStorage.setItem(LS, JSON.stringify(state));
+}
+/* liste des destinataires connus : profils enregistrés + saisies libres */
+function knownEaters(){
+  const used = new Set(state.eaters);
+  Object.keys(state.plan).forEach(k=>{
+    SLOTS.forEach(s => ((state.plan[k][s])||[]).forEach(e=>{ const w = whoOf(e); if(w) used.add(w); }));
+  });
+  return Array.from(used).sort((a,b)=>a.localeCompare(b,'fr'));
+}
+
+/* ============================================================
+   RENDU — CALENDRIER
+   ============================================================ */
+function renderWeek(){
+  const dates = weekDates(ANCHOR);
+  const { week, year } = isoWeek(ANCHOR);
+  $('#wLabel').textContent = 'Semaine ' + week;
+  $('#wRange').textContent = year + ' · du ' + fmtDate(dates[0]) + ' au ' + fmtDate(dates[6]);
+
+  const total = dates.reduce((n,d)=> n + recipesOfDay(isoOf(d)).length, 0);
+  const el = $('#wCount');
+  el.className = 'pill' + (cloud.on ? ' cloud' : '');
+  el.textContent = cloud.on
+    ? total + (total>1?' plats · synchronisé':' plat · synchronisé')
+    : total + (total>1?' plats':' plat') + ' · local';
+
+  const todayKey = isoOf(new Date());
+  $('#weekDays').innerHTML = dates.map(d=>{
+    const key = isoOf(d);
+    const day = state.plan[key] || {};
+    const isToday = key === todayKey;
+    const n = recipesOfDay(key).length;
+    const slots = SLOTS.map(s=>{
+      const list = day[s.k] || [];
+      return `
+        <div class="slot">
+          <div class="slot-t">${s.l}</div>
+          ${list.map(entry=>{
+            const id = eidOf(entry), who = whoOf(entry);
+            const r = findRecipe(id);
+            if(!r) return '';
+            const tags = (r.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('');
+            return `<div class="chip">
+              <div class="nm">${who?`<span class="whopill">${esc(who)}</span>`:''}${esc(r.name)}${tags?`<div class="tags">${tags}</div>`:''}
+                <button class="whobtn${who?' set':''}" data-act="whofor" data-date="${key}" data-slot="${s.k}" data-id="${id}">${who?'Pour : '+esc(who):'＋ Pour qui ?'}</button>
+              </div>
+              <button class="x" data-act="unplan" data-date="${key}" data-slot="${s.k}" data-id="${id}" aria-label="Retirer">×</button>
+            </div>`;
+          }).join('')}
+          <button class="addmini" data-act="plan" data-date="${key}" data-slot="${s.k}">+ Ajouter une recette</button>
+        </div>`;
+    }).join('');
+    return `<div class="day${isToday?' today':''}">
+      <div class="day-h">
+        <span class="dname">${DAYS[(d.getDay()+6)%7]}</span>
+        <span class="dnum">${fmtDate(d)}</span>
+        ${isToday?'<span class="badge">Aujourd’hui</span>':''}
+      </div>
+      <div class="slots">${slots}</div>
+    </div>`;
+  }).join('');
+}
+
+/* ============================================================
+   RENDU — RECETTES
+   ============================================================ */
+let filterTag = null;
+function renderRecipes(){
+  const q = $('#qRec').value.trim().toLowerCase();
+  // nuage d'étiquettes
+  const counts = {};
+  state.recipes.forEach(r => (r.tags||[]).forEach(t => counts[t] = (counts[t]||0)+1));
+  const tags = Object.keys(counts).sort((a,b)=>a.localeCompare(b,'fr'));
+  $('#recTags').innerHTML = tags.length
+    ? `<button class="tagpick${filterTag===null?' on':''}" data-act="ftag" data-tag="">Toutes (${state.recipes.length})</button>` +
+      tags.map(t=>`<button class="tagpick${filterTag===t?' on':''}" data-act="ftag" data-tag="${esc(t)}">${esc(t)} <span class="cnt">${counts[t]}</span></button>`).join('')
+    : '';
+
+  let list = state.recipes.slice().sort((a,b)=>a.name.localeCompare(b.name,'fr'));
+  if(q) list = list.filter(r => r.name.toLowerCase().includes(q) || (r.ingredients||[]).some(i=>i.name.toLowerCase().includes(q)));
+  if(filterTag) list = list.filter(r => (r.tags||[]).includes(filterTag));
+
+  $('#recList').innerHTML = list.length ? list.map(r=>{
+    const ing = (r.ingredients||[]).length;
+    const tags = (r.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('');
+    return `<div class="rec" data-act="openrec" data-id="${r.id}">
+      <h3>${esc(r.name)}</h3>
+      <div class="meta">
+        <span>⏱ ${r.duration} min</span>
+        <span>${ing} ingrédient${ing>1?'s':''}</span>
+      </div>
+      ${tags?`<div class="tags" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:7px">${tags}</div>`:''}
+      ${ing?`<div class="ing">${esc((r.ingredients||[]).map(i=>i.name + ((i.qty||i.unit) ? ' ('+qtyLabel(i.qty,i.unit)+')' : '')).join(' · '))}</div>`:''}
+    </div>`;
+  }).join('') : `<div class="empty">Aucune recette ${q||filterTag?'ne correspond à ce filtre':'pour l’instant'}.<br><span class="muted">Ajoute ta première recette avec le bouton ci-dessus.</span></div>`;
+}
+
+/* ============================================================
+   RENDU — COURSES
+   ============================================================ */
+function renderShop(){
+  const arr = state.shopping;
+  $('#shopList').innerHTML = arr.length ? arr.map(it=>`
+    <div class="shopitem${it.done?' done':''}">
+      <button class="ck${it.done?' on':''}" data-act="ck" data-id="${it.id}" aria-label="Cocher">
+        <svg viewBox="0 0 24 24"><polyline points="4 12 10 18 20 6"/></svg>
+      </button>
+      <div class="txt">${esc(it.label)}${it.src?`<small>${esc(it.src)}</small>`:''}</div>
+      <button class="x" data-act="delitem" data-id="${it.id}" aria-label="Supprimer">×</button>
+    </div>`).join('')
+    : `<div class="empty">Ta liste est vide.<br><span class="muted">Ajoute un produit, ou importe les ingrédients d’une semaine du calendrier.</span></div>`;
+}
+function renderWeekSelect(){
+  const { week, year } = isoWeek(ANCHOR);
+  const sel = $('#impWeek');
+  if(!sel.options.length){
+    const opts = [];
+    for(let y = year-1; y <= year+1; y++){
+      for(let w = 1; w <= 52; w++){
+        const mon = mondayOfWeek(y,w);
+        opts.push(`<option value="${y}-${w}">Semaine ${w} — ${y} · du ${fmtDate(mon)} au ${fmtDate(addDays(mon,6))}</option>`);
+      }
+    }
+    sel.innerHTML = opts.join('');
+  }
+  sel.value = year + '-' + week;
+}
+function renderImport(){
+  const v = $('#impWeek').value; if(!v) return;
+  const [y,w] = v.split('-').map(Number);
+  const mon = mondayOfWeek(y,w);
+  const dates = DAYS.map((_,i)=> addDays(mon,i));
+  const recipes = dates.flatMap(d => recipesOfDay(isoOf(d)));
+  const uniq = Array.from(new Set(recipes)).map(findRecipe).filter(Boolean);
+
+  if(!uniq.length){
+    $('#impPreview').innerHTML = `<div class="empty" style="padding:16px">Aucune recette programmée cette semaine-là.</div>`;
+    return;
+  }
+  const groups = {};
+  uniq.forEach(r => (r.ingredients||[]).forEach(i=>{
+    const k = i.name.trim().toLowerCase();
+    if(!groups[k]) groups[k] = { name:i.name.trim(), qty:0, unit:i.unit||'', src:new Set() };
+    groups[k].qty += Number(i.qty)||0;
+    groups[k].src.add(r.name);
+  }));
+  const keys = Object.keys(groups).sort((a,b)=>a.localeCompare(b,'fr'));
+  $('#impPreview').innerHTML = `
+    <div class="muted" style="margin-bottom:8px">${uniq.length} recette${uniq.length>1?'s':''} · ${keys.length} produit${keys.length>1?'s':''}</div>
+    <div style="margin-bottom:10px">${uniq.map(r=>`<span class="tag" style="margin:0 4px 4px 0">${esc(r.name)}</span>`).join('')}</div>
+    <div style="max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:12px;padding:4px 10px;background:var(--white)">
+      ${keys.map(k=>`<div class="ingrow"><span style="flex:1">${esc(groups[k].name)}</span><span class="q">${esc(qtyLabel(groups[k].qty, groups[k].unit))}</span></div>`).join('')}
+    </div>
+    <div class="row" style="margin-top:12px;gap:8px">
+      <button class="btn sm" style="flex:1" data-act="import" data-mode="add">Ajouter à ma liste</button>
+      <button class="btn ghost sm" style="flex:1" data-act="import" data-mode="replace">Remplacer</button>
+    </div>`;
+}
+
+/* ============================================================
+   RENDU GLOBAL
+   ============================================================ */
+function render(){
+  renderWeek();
+  renderRecipes();
+  renderShop();
+  renderWeekSelect();
+  renderImport();
+}
+/* ============================================================
+   MODALES
+   ============================================================ */
+function openModal(html){
+  $('#sheet').innerHTML = '<div class="grab"></div>' + html;
+  $('#modal').classList.add('on');
+  document.body.style.overflow = 'hidden';
+}
+function closeModal(){
+  $('#modal').classList.remove('on');
+  $('#sheet').innerHTML = '';
+  document.body.style.overflow = '';
+}
+$('#modal').addEventListener('click', e => { if(e.target.id === 'modal') closeModal(); });
+
+/* ---- choisir une recette pour un créneau ---- */
+let pickerCtx = null;
+function openPicker(dateKey, slot){
+  pickerCtx = { dateKey, slot };
+  const day = state.plan[dateKey] || {};
+  const already = day[slot] || [];
+  openModal(`
+    <h2>Ajouter au ${DAYS[(new Date(dateKey+'T12:00:00').getDay()+6)%7].toLowerCase()} ${SLOTS.find(s=>s.k===slot).l.toLowerCase()}</h2>
+    <div class="searchwrap">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
+      <input type="search" id="pickQ" placeholder="Rechercher…" autocomplete="off">
+    </div>
+    <div id="pickList" style="max-height:52vh;overflow-y:auto"></div>
+    <div class="foot"><button class="btn ghost" data-act="closemodal">Fermer</button></div>
+  `);
+  const paint = () => {
+    const q = ($('#pickQ').value||'').trim().toLowerCase();
+    let list = state.recipes.slice().sort((a,b)=>a.name.localeCompare(b.name,'fr'));
+    if(q) list = list.filter(r=>r.name.toLowerCase().includes(q));
+    $('#pickList').innerHTML = list.length ? list.map(r=>`
+      <div class="rec" style="margin-bottom:8px" data-act="doplan" data-id="${r.id}">
+        <h3>${esc(r.name)}</h3>
+        <div class="meta"><span>⏱ ${r.duration} min</span>${already.includes(r.id)?'<span class="pill">déjà prévu</span>':''}</div>
+      </div>`).join('')
+      : `<div class="empty">Aucune recette. Crée-en une depuis l’onglet Recettes.</div>`;
+  };
+  $('#pickQ').addEventListener('input', paint);
+  paint();
+}
+
+/* ---- fiches recette ---- */
+function openRecipe(id){
+  const r = findRecipe(id); if(!r) return;
+  const ing = (r.ingredients||[]).map(i=>`<div class="ingrow"><span style="flex:1">${esc(i.name)}</span><span class="q">${esc(qtyLabel(i.qty,i.unit))}</span></div>`).join('');
+  openModal(`
+    <h2>${esc(r.name)}</h2>
+    <div class="row" style="gap:8px;margin-bottom:12px">
+      <span class="pill">⏱ ${r.duration} min</span>
+      ${(r.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}
+    </div>
+    <h2 class="sec">Ingrédients</h2>
+    ${ing || '<div class="muted">Aucun ingrédient renseigné.</div>'}
+    <div class="foot">
+      <button class="btn ghost" style="flex:1" data-act="editrec" data-id="${r.id}">Modifier</button>
+      <button class="btn" style="flex:1" data-act="planfrom" data-id="${r.id}">Planifier</button>
+    </div>
+    <button class="btn danger block" style="margin-top:9px" data-act="delrec" data-id="${r.id}">Supprimer la recette</button>
+  `);
+}
+
+function ingredientRow(name='', qty='', unit='g'){
+  return `<div class="ingline">
+    <input type="text" class="i-name" placeholder="Ingrédient" value="${esc(name)}">
+    <input type="number" class="i-qty" min="1" step="1" placeholder="Qté" value="${qty}">
+    <select class="i-unit">${UNITS.map(u=>`<option value="${u.k}"${u.k===unit?' selected':''}>${esc(u.l)}</option>`).join('')}</select>
+    <button class="x" data-act="deling" aria-label="Retirer la ligne">×</button>
+  </div>`;
+}
+
+function openRecipeForm(id){
+  const r = id ? findRecipe(id) : null;
+  const existing = Array.from(new Set(state.recipes.flatMap(x=>x.tags||[]))).sort((a,b)=>a.localeCompare(b,'fr'));
+  openModal(`
+    <h2>${r ? 'Modifier la recette' : 'Nouvelle recette'}</h2>
+    <form id="recForm" autocomplete="off">
+      <label class="f">Nom de la recette</label>
+      <input type="text" id="rName" required value="${r?esc(r.name):''}" placeholder="Ex. Risotto aux champignons">
+
+      <label class="f">Durée (minutes)</label>
+      <input type="number" id="rDur" min="1" step="1" required value="${r?r.duration:''}" placeholder="30">
+
+      <label class="f">Ingrédients</label>
+      <div id="ingWrap">
+        ${(r&&r.ingredients&&r.ingredients.length ? r.ingredients : [{name:'',qty:'',unit:'g'}]).map(i=>ingredientRow(i.name,i.qty,i.unit||'g')).join('')}
+      </div>
+      <button type="button" class="btn ghost block" style="margin-top:8px" data-act="adding">+ Ajouter une ligne</button>
+
+      <label class="f">Étiquettes</label>
+      <input type="text" id="rTags" list="tagSuggest" value="${r?esc((r.tags||[]).join(', ')):''}" placeholder="végétarien, rapide, hiver…">
+      <datalist id="tagSuggest">${existing.map(t=>`<option value="${esc(t)}">`).join('')}</datalist>
+      <div class="muted" style="margin-top:5px">Sépare-les par des virgules.</div>
+
+      <div class="foot">
+        <button type="button" class="btn ghost" data-act="closemodal">Annuler</button>
+        <button type="submit" class="btn">${r?'Enregistrer':'Créer la recette'}</button>
+      </div>
+    </form>
+  `);
+  const form = $('#recForm');
+  form.addEventListener('submit', ev=>{
+    ev.preventDefault();
+    const name = $('#rName').value.trim();
+    const duration = parseInt($('#rDur').value,10);
+    if(!name){ toast('Le nom est obligatoire'); return; }
+    if(!(duration > 0)){ toast('La durée doit être un nombre entier positif'); return; }
+    const ingredients = Array.from($$('#ingWrap .ingline')).map(line=>{
+      const n = line.querySelector('.i-name').value.trim();
+      const q = parseInt(line.querySelector('.i-qty').value,10);
+      const u = line.querySelector('.i-unit').value;
+      return n ? { name:n, qty: (q>0?q:1), unit:u } : null;
+    }).filter(Boolean);
+    const tags = $('#rTags').value.split(',').map(t=>t.trim()).filter(Boolean);
+    const uniqTags = Array.from(new Set(tags));
+
+    if(r){
+      Object.assign(r, { name, duration, ingredients, tags:uniqTags });
+    } else {
+      state.recipes.push({ id:uid(), name, duration, ingredients, tags:uniqTags });
+    }
+    store.save(); render(); closeModal();
+    toast(r?'Recette mise à jour':'Recette ajoutée');
+  });
+}
+
+/* ---- choisir un créneau pour planifier une recette ---- */
+function openSlotPicker(recipeId){
+  const dates = weekDates(ANCHOR);
+  const { week } = isoWeek(ANCHOR);
+  openModal(`
+    <h2>Planifier cette recette</h2>
+    <div class="muted" style="margin-bottom:12px">Semaine ${week} — choisis le jour et le moment.</div>
+    ${dates.map(d=>{
+      const key = isoOf(d);
+      return `<div class="card" style="margin-bottom:9px;box-shadow:none">
+        <div class="row" style="justify-content:space-between;margin-bottom:8px">
+          <b style="font-size:14.5px">${DAYS[(d.getDay()+6)%7]} ${fmtDate(d)}</b>
+        </div>
+        <div class="row">
+          ${SLOTS.map(s=>`<button class="btn ghost sm" style="flex:1" data-act="doplan" data-id="${recipeId}" data-date="${key}" data-slot="${s.k}">${s.l}</button>`).join('')}
+        </div>
+      </div>`;
+    }).join('')}
+    <div class="foot"><button class="btn ghost" data-act="closemodal">Annuler</button></div>
+  `);
+}
+
+/* ---- destinataire d'un plat (« pour qui ») ---- */
+function openWhofor(dateKey, slot, rid){
+  const entry = ((state.plan[dateKey]||{})[slot]||[]).find(e => eidOf(e) === rid);
+  const current = whoOf(entry);
+  const list = knownEaters();
+  openModal(`
+    <h2>Pour qui&nbsp;?</h2>
+    <div class="muted" style="margin-bottom:12px">Désigne le destinataire de ce plat — pratique pour savoir ce que tu cuisines pour toi ou pour ton enfant.</div>
+    <div class="tagbox" style="margin-bottom:14px">
+      <button class="tagpick${current===''?' on':''}" data-act="doplanfor" data-date="${dateKey}" data-slot="${slot}" data-id="${rid}" data-who="">Personne / commun</button>
+      ${list.map(n=>`<button class="tagpick${current===n?' on':''}" data-act="doplanfor" data-date="${dateKey}" data-slot="${slot}" data-id="${rid}" data-who="${esc(n)}">${esc(n)}</button>`).join('')}
+    </div>
+    <label class="f">Autre nom</label>
+    <div class="row">
+      <input type="text" id="whoFree" placeholder="Ex. Léo, les grands-parents…" value="${esc(current)}" style="flex:1">
+      <button class="btn sm" id="whoOk" style="flex:none">Valider</button>
+    </div>
+    <div class="foot"><button class="btn ghost" data-act="closemodal">Annuler</button></div>
+  `);
+  $('#whoOk').addEventListener('click', ()=>{
+    const v = $('#whoFree').value.trim();
+    if(v && !state.eaters.includes(v)) state.eaters.push(v);
+    applyWho(dateKey, slot, rid, v);
+  });
+  $('#whoFree').addEventListener('keydown', e=>{
+    if(e.key === 'Enter'){ e.preventDefault(); $('#whoOk').click(); }
+  });
+}
+function applyWho(dateKey, slot, rid, who){
+  const list = ((state.plan[dateKey]||{})[slot]||[]);
+  const pos = list.findIndex(e => eidOf(e) === rid);
+  if(pos >= 0) list[pos] = { id:rid, who };
+  store.save(); closeModal(); render(); toast('Destinataire mis à jour');
+}
+
+/* ---- gérer la liste des destinataires ---- */
+function openEaterForm(){
+  openModal(`
+    <h2>Pour qui je cuisine&nbsp;?</h2>
+    <div class="muted" style="margin-bottom:12px">Ces noms apparaissent en un tap quand tu attribues un plat. Tu peux aussi en saisir un à la volée depuis le calendrier.</div>
+    ${state.eaters.length ? state.eaters.map(n=>`
+      <div class="shopitem">
+        <div class="txt">${esc(n)}</div>
+        <button class="x" data-act="deleater" data-name="${esc(n)}" aria-label="Retirer">×</button>
+      </div>`).join('') : '<div class="empty" style="padding:16px">Aucun nom enregistré pour l’instant.</div>'}
+    <label class="f">Ajouter un nom</label>
+    <div class="row">
+      <input type="text" id="eaterNew" placeholder="Ex. Léo" style="flex:1">
+      <button class="btn sm" id="eaterOk" style="flex:none">Ajouter</button>
+    </div>
+    <div class="foot"><button class="btn ghost" data-act="closemodal">Fermer</button></div>
+  `);
+  const add = ()=>{
+    const v = $('#eaterNew').value.trim();
+    if(!v) return;
+    if(!state.eaters.includes(v)) state.eaters.push(v);
+    store.save(); render(); openEaterForm();
+  };
+  $('#eaterOk').addEventListener('click', add);
+  $('#eaterNew').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); add(); }});
+}
+
+/* ---- import courses ---- */
+function doImport(mode){
+  const v = $('#impWeek').value; if(!v) return;
+  const [y,w] = v.split('-').map(Number);
+  const mon = mondayOfWeek(y,w);
+  const dates = DAYS.map((_,i)=> addDays(mon,i));
+  const recipes = Array.from(new Set(dates.flatMap(d => recipesOfDay(isoOf(d))))).map(findRecipe).filter(Boolean);
+  if(!recipes.length){ toast('Aucune recette cette semaine-là'); return; }
+
+  const groups = {};
+  recipes.forEach(r => (r.ingredients||[]).forEach(i=>{
+    const k = i.name.trim().toLowerCase();
+    if(!groups[k]) groups[k] = { name:i.name.trim(), qty:0, src:new Set() };
+    groups[k].qty += Number(i.qty)||0;
+    groups[k].src.add(r.name);
+  }));
+
+  const items = Object.keys(groups).sort((a,b)=>a.localeCompare(b,'fr')).map(k=>({
+    id: uid(),
+    label: groups[k].name + (groups[k].qty ? ' — ' + groups[k].qty : ''),
+    key: k,
+    src: 'Semaine ' + w + ' · ' + Array.from(groups[k].src).join(', '),
+    done: false
+  }));
+
+  if(mode === 'replace'){
+    state.shopping = items;
+  } else {
+    const known = new Set(state.shopping.filter(i=>!i.done && i.key).map(i=>i.key));
+    const fresh = items.filter(i=>!known.has(i.key));
+    state.shopping = state.shopping.concat(fresh);
+    if(!fresh.length) toast('Tous ces produits sont déjà dans la liste');
+    else toast(fresh.length + ' produit' + (fresh.length>1?'s':'') + ' ajouté' + (fresh.length>1?'s':''));
+  }
+  store.save(); render();
+}
+
+/* ============================================================
+   ÉVÉNEMENTS
+   ============================================================ */
+document.addEventListener('click', e=>{
+  const t = e.target.closest('[data-act]');
+  if(!t) return;
+  const act = t.dataset.act;
+  const id  = t.dataset.id;
+
+  switch(act){
+    case 'unplan': {
+      const day = state.plan[t.dataset.date];
+      if(day){
+        const list = day[t.dataset.slot] || [];
+        const pos = list.findIndex(e => eidOf(e) === id);
+        if(pos >= 0) list.splice(pos, 1);
+      }
+      store.save(); render(); break;
+    }
+    case 'plan':    openPicker(t.dataset.date, t.dataset.slot); break;
+    case 'doplan': {
+      const key = t.dataset.date;
+      const slot = t.dataset.slot || (pickerCtx && pickerCtx.slot);
+      const date = key || (pickerCtx && pickerCtx.dateKey);
+      state.plan[date] = state.plan[date] || { midi:[], soir:[] };
+      state.plan[date].midi = state.plan[date].midi || [];
+      state.plan[date].soir = state.plan[date].soir || [];
+      state.plan[date][slot] = state.plan[date][slot] || [];
+      if(!state.plan[date][slot].some(e => eidOf(e) === id)) state.plan[date][slot].push({ id, who:'' });
+      store.save(); closeModal(); render();
+      toast('Plat ajouté au calendrier');
+      break;
+    }
+    case 'openrec': openRecipe(id); break;
+    case 'editrec': openRecipeForm(id); break;
+    case 'planfrom': openSlotPicker(id); break;
+    case 'delrec': {
+      state.recipes = state.recipes.filter(r=>r.id!==id);
+      Object.keys(state.plan).forEach(k=>{
+        SLOTS.forEach(s=>{
+          if(state.plan[k][s]) state.plan[k][s] = state.plan[k][s].filter(x=>x!==id);
+        });
+      });
+      store.save(); closeModal(); render(); toast('Recette supprimée');
+      break;
+    }
+    case 'adding': $('#ingWrap').insertAdjacentHTML('beforeend', ingredientRow()); break;
+    case 'deling': t.closest('.ingline').remove(); break;
+    case 'ftag': filterTag = t.dataset.tag || null; renderRecipes(); break;
+    case 'closemodal': closeModal(); break;
+    case 'ck': {
+      const it = state.shopping.find(x=>x.id===id);
+      if(it){ it.done = !it.done; store.save(); renderShop(); }
+      break;
+    }
+    case 'delitem': state.shopping = state.shopping.filter(x=>x.id!==id); store.save(); renderShop(); break;
+    case 'import': doImport(t.dataset.mode); break;
+    case 'eater': openEaterForm(); break;
+    case 'deleater': state.eaters = state.eaters.filter(x=>x!==t.dataset.name); store.save(); render(); toast('Profil retiré'); break;
+    case 'doplanfor': {
+      const key = t.dataset.date, slot = t.dataset.slot, rid = t.dataset.id;
+      state.plan[key] = state.plan[key] || { midi:[], soir:[] };
+      state.plan[key][slot] = state.plan[key][slot] || [];
+      const pos = state.plan[key][slot].indexOf(rid);
+      if(pos >= 0){
+        const who = t.dataset.who || '';
+        state.plan[key][slot][pos] = Object.assign({}, state.plan[key][slot][pos], { who });
+      }
+      store.save(); closeModal(); render(); toast('Destinataire mis à jour');
+      break;
+    }
+  }
+});
+
+/* --- navigation --- */
+$$('nav.tabs button').forEach(b=>{
+  b.addEventListener('click', ()=>{
+    $$('nav.tabs button').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+    $$('.view').forEach(v=>v.classList.remove('on'));
+    $('#v-' + b.dataset.v).classList.add('on');
+    window.scrollTo({top:0});
+  });
+});
+
+/* --- semaine --- */
+$('#prevW').addEventListener('click', ()=>{ ANCHOR = addDays(ANCHOR,-7); render(); });
+$('#nextW').addEventListener('click', ()=>{ ANCHOR = addDays(ANCHOR,7); render(); });
+$('#prevW2').addEventListener('click', ()=>{
+  const [y,w] = $('#impWeek').value.split('-').map(Number);
+  const prev = w>1 ? [y,w-1] : [y-1,52];
+  $('#impWeek').value = prev[0]+'-'+prev[1]; renderImport();
+});
+$('#nextW2').addEventListener('click', ()=>{
+  const [y,w] = $('#impWeek').value.split('-').map(Number);
+  const next = w<52 ? [y,w+1] : [y+1,1];
+  $('#impWeek').value = next[0]+'-'+next[1]; renderImport();
+});
+$('#todayBtn').addEventListener('click', ()=>{ ANCHOR = new Date(); ANCHOR.setHours(0,0,0,0); render(); });
+$('#eatersBtn').addEventListener('click', openEaterForm);
+
+$('#pickWeekBtn').addEventListener('click', ()=>{
+  openModal(`
+    <h2>Aller à une semaine</h2>
+    <label class="f">Année</label>
+    <select id="goYear">${[isoWeek(new Date()).year-1, isoWeek(new Date()).year, isoWeek(new Date()).year+1].map(y=>`<option${y===isoWeek(ANCHOR).year?' selected':''}>${y}</option>`).join('')}</select>
+    <label class="f">Semaine</label>
+    <select id="goWeek">${Array.from({length:52},(_,i)=>i+1).map(w=>`<option value="${w}"${w===isoWeek(ANCHOR).week?' selected':''}>Semaine ${w}</option>`).join('')}</select>
+    <div class="foot"><button class="btn ghost" data-act="closemodal">Annuler</button><button class="btn" id="goOk">Y aller</button></div>
+  `);
+  $('#goOk').addEventListener('click', ()=>{
+    ANCHOR = mondayOfWeek(parseInt($('#goYear').value,10), parseInt($('#goWeek').value,10));
+    closeModal(); render();
+  });
+});
+$('#weekToCart').addEventListener('click', ()=>{
+  $$('nav.tabs button').forEach(x=>x.classList.remove('on'));
+  document.querySelector('nav.tabs button[data-v="shop"]').classList.add('on');
+  $$('.view').forEach(v=>v.classList.remove('on'));
+  $('#v-shop').classList.add('on');
+  renderWeekSelect(); renderImport();
+  window.scrollTo({top:0});
+});
+
+/* --- recettes --- */
+$('#newRec').addEventListener('click', ()=> openRecipeForm(null));
+$('#qRec').addEventListener('input', renderRecipes);
+
+/* --- courses --- */
+function addManual(){
+  const v = $('#newItem').value.trim();
+  if(!v) return;
+  state.shopping.push({ id:uid(), label:v, key:null, src:'', done:false });
+  $('#newItem').value = '';
+  store.save(); renderShop(); toast('Produit ajouté');
+}
+$('#addItem').addEventListener('click', addManual);
+$('#newItem').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); addManual(); }});
+$('#clearDone').addEventListener('click', ()=>{
+  state.shopping = state.shopping.filter(i=>!i.done);
+  store.save(); renderShop(); toast('Liste nettoyée');
+});
+$('#impWeek').addEventListener('change', renderImport);
+
+/* --- démarrage --- */
+store.local();
+migrer();
+render();
+cloud.init();
+</script>
+</body>
+</html>
