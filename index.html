@@ -488,7 +488,7 @@ const store = {
    SYNCHRONISATION MULTI-APPAREILS (Supabase — optionnel)
    ------------------------------------------------------------
    Les identifiants sont dans config.js. Chaque personne se
-   connecte avec son e-mail (code reçu par mail, ou lien), puis
+   connecte avec son e-mail (lien reçu par mail, ou code), puis
    partage les données des « foyers » dont elle est membre.
    Si config.js est vide, l'app fonctionne en local uniquement.
    ============================================================ */
@@ -528,7 +528,7 @@ const auth = {
     if(!r.ok) throw Object.assign(new Error(j.msg || j.error_description || j.message || ('HTTP '+r.status)), { status:r.status });
     return j;
   },
-  /* envoie l'e-mail contenant le code (et le lien) de connexion */
+  /* envoie l'e-mail contenant le lien (et le code, si le modèle d'e-mail l'inclut) */
   sendCode(email){
     const back = location.origin + location.pathname;
     return this.call('otp?redirect_to=' + encodeURIComponent(back), { email, create_user:true });
@@ -539,10 +539,12 @@ const auth = {
   },
   /* retour depuis le lien de l'e-mail : l'adresse contient #access_token=…&refresh_token=… */
   async fromUrl(){
-    if(!location.hash) return false;
     const h = new URLSearchParams(location.hash.slice(1));
-    const clean = () => history.replaceState(null, '', location.pathname + location.search);
-    if(h.get('error_description')){ clean(); throw new Error(h.get('error_description')); }
+    const q = new URLSearchParams(location.search);
+    const clean = () => history.replaceState(null, '', location.pathname);
+    /* lien expiré ou déjà utilisé : Supabase renvoie l'erreur dans l'adresse (#… ou ?…) */
+    const err = h.get('error_description') || h.get('error') || q.get('error_description') || q.get('error');
+    if(err){ clean(); throw new Error(err); }
     if(!h.get('access_token')) return false;
     clean();
     const s = { access_token:h.get('access_token'), refresh_token:h.get('refresh_token'),
@@ -653,11 +655,16 @@ async function initCloud(){
   if(!CLOUD_OK) return;                         // pas de Supabase configuré : 100 % local
   $('#acctBtn').hidden = false;
   auth.load();
-  try{ await auth.fromUrl(); }catch(e){ toast('Lien de connexion invalide ou expiré'); }
+  let linkErr = '';
+  try{
+    if(await auth.fromUrl()){ localStorage.removeItem(LS_LOCALONLY); toast('Connecté·e'); }
+  }catch(e){
+    linkErr = 'Ce lien de connexion est invalide, expiré ou a déjà servi. Demande un nouveau lien ci-dessous.';
+  }
   if(auth.session) await cloud.start();
   else{
     paintAccount();
-    if(localStorage.getItem(LS_LOCALONLY) !== '1') openLogin();
+    if(linkErr || localStorage.getItem(LS_LOCALONLY) !== '1') openLogin('', linkErr);
   }
   /* retour sur l'app (autre onglet, téléphone déverrouillé…) : on envoie nos
      modifs en attente, puis on récupère celles des autres membres du foyer */
@@ -678,6 +685,7 @@ async function initCloud(){
     if(e.key === LS_SESSION){
       auth.load();
       if(auth.session && !cloud.on){ closeModal(); await cloud.start(); }
+      else if(!auth.session && cloud.on){ cloud.on = false; paintSync(); }   // déconnecté dans un autre onglet
     }
   });
 }
@@ -690,17 +698,24 @@ function paintAccount(){
 function paintSync(){ paintAccount(); renderWeek(); }
 
 /* ---------- écrans de connexion ---------- */
-function openLogin(email = ''){
+const SEND_LABEL = 'Recevoir le lien de connexion';
+/* message lisible pour une erreur d'envoi d'e-mail */
+function sendErrMsg(e){
+  return /rate|security purposes|seconds|too many/i.test(e.message)
+    ? 'Trop de demandes rapprochées : le nombre d’e-mails est limité (quelques-uns par heure). Utilise le dernier lien reçu, ou réessaie plus tard.'
+    : 'Envoi impossible : ' + e.message;
+}
+function openLogin(email = '', err = ''){
   openModal(`
     <h2>Connexion</h2>
-    <div class="muted" style="margin-bottom:6px">Connecte-toi avec ton adresse e-mail pour partager recettes, calendrier et courses avec ton foyer, sur tous tes appareils. Pas de mot de passe : tu reçois un code par e-mail.</div>
+    <div class="muted" style="margin-bottom:6px">Connecte-toi avec ton adresse e-mail pour partager recettes, calendrier et courses avec ton foyer, sur tous tes appareils. Pas de mot de passe : tu reçois un lien de connexion par e-mail.</div>
     <form id="loginForm" autocomplete="on">
       <label class="f">Adresse e-mail</label>
       <input type="email" id="lEmail" required autocomplete="email" inputmode="email" placeholder="prenom@exemple.fr" value="${esc(email)}">
-      <div class="err" id="lErr"></div>
+      <div class="err" id="lErr">${esc(err)}</div>
       <div class="foot">
         <button type="button" class="btn ghost" data-act="localonly">Plus tard</button>
-        <button type="submit" class="btn" id="lGo">Recevoir le code</button>
+        <button type="submit" class="btn" id="lGo">${SEND_LABEL}</button>
       </div>
     </form>
   `);
@@ -711,28 +726,35 @@ function openLogin(email = ''){
     $('#lGo').disabled = true; $('#lGo').textContent = 'Envoi…'; $('#lErr').textContent = '';
     try{ await auth.sendCode(mail); openCode(mail); }
     catch(e){
-      $('#lErr').textContent = /rate|security purposes|seconds/i.test(e.message)
-        ? 'Trop de demandes rapprochées : patiente un peu avant de redemander un code.'
-        : 'Envoi impossible : ' + e.message;
-      $('#lGo').disabled = false; $('#lGo').textContent = 'Recevoir le code';
+      $('#lErr').textContent = sendErrMsg(e);
+      $('#lGo').disabled = false; $('#lGo').textContent = SEND_LABEL;
     }
   });
 }
 function openCode(email){
   openModal(`
     <h2>Vérifie tes e-mails</h2>
-    <div class="muted" style="margin-bottom:6px">Un e-mail vient d’être envoyé à <b>${esc(email)}</b>. Saisis le code reçu, ou clique sur le lien de l’e-mail depuis cet appareil. Pense à regarder dans les spams.</div>
-    <form id="codeForm">
-      <label class="f">Code reçu</label>
-      <input type="text" id="lCode" class="code" required inputmode="numeric" autocomplete="one-time-code" maxlength="12" placeholder="••••••">
-      <div class="err" id="lErr"></div>
-      <div class="foot">
-        <button type="button" class="btn ghost" data-act="relogin" data-email="${esc(email)}">Changer d’adresse</button>
-        <button type="submit" class="btn" id="cGo">Valider</button>
-      </div>
-    </form>
+    <div class="muted" style="margin-bottom:6px">Un e-mail vient d’être envoyé à <b>${esc(email)}</b>. Ouvre-le <b>sur cet appareil</b> et clique sur le lien qu’il contient : l’app s’ouvrira et tu seras connecté·e. Pense à regarder dans les spams.</div>
+    <div class="err" id="rErr"></div>
+    <div class="foot">
+      <button type="button" class="btn ghost" data-act="relogin" data-email="${esc(email)}">Changer d’adresse</button>
+      <button type="button" class="btn ghost" id="rGo">Renvoyer l’e-mail</button>
+    </div>
+    <details class="help" style="margin-top:14px">
+      <summary>J’ai reçu un code à la place</summary>
+      <form id="codeForm">
+        <input type="text" id="lCode" class="code" required inputmode="numeric" autocomplete="one-time-code" maxlength="12" placeholder="••••••" style="margin-top:8px">
+        <div class="err" id="lErr"></div>
+        <button type="submit" class="btn block" id="cGo">Valider le code</button>
+      </form>
+    </details>
   `);
-  $('#lCode').focus();
+  $('#rGo').addEventListener('click', async ()=>{
+    $('#rGo').disabled = true; $('#rErr').textContent = '';
+    try{ await auth.sendCode(email); toast('Nouvel e-mail envoyé'); }
+    catch(e){ $('#rErr').textContent = sendErrMsg(e); }
+    $('#rGo').disabled = false;
+  });
   $('#codeForm').addEventListener('submit', async ev=>{
     ev.preventDefault();
     const code = $('#lCode').value.replace(/\D/g,'');
@@ -997,9 +1019,13 @@ function renderShop(){
     : `<div class="empty">Ta liste est vide.<br><span class="muted">Ajoute un produit, ou importe les ingrédients d’une semaine du calendrier.</span></div>`;
 }
 let selYear = null;                            // année autour de laquelle la liste a été construite
-function renderWeekSelect(){
+let selAnchor = '';                            // semaine du calendrier lors du dernier alignement
+function renderWeekSelect(force){
   const { week, year } = isoWeek(ANCHOR);
   const sel = $('#impWeek');
+  /* garde la semaine choisie dans « Courses » tant que le calendrier n'a pas changé de semaine */
+  if(!force && selAnchor === year + '-' + week && sel.value) return;
+  selAnchor = year + '-' + week;
   if(selYear !== year){                        // reconstruit si on a changé d'année
     const opts = [];
     for(let y = year-1; y <= year+1; y++){
@@ -1149,7 +1175,7 @@ function openRecipeForm(id){
 
       <label class="f">Ingrédients</label>
       <div id="ingWrap">
-        ${(r&&r.ingredients&&r.ingredients.length ? r.ingredients : [{name:'',qty:'',unit:'g'}]).map(i=>ingredientRow(i.name,i.qty,i.unit||'g')).join('')}
+        ${(r&&r.ingredients&&r.ingredients.length ? r.ingredients : [{name:'',qty:'',unit:'g'}]).map(i=>ingredientRow(i.name,i.qty,i.unit ?? 'g')).join('')}
       </div>
       <button type="button" class="btn ghost block" style="margin-top:8px" data-act="adding">+ Ajouter une ligne</button>
 
@@ -1421,14 +1447,25 @@ $('#eatersBtn').addEventListener('click', openEaterForm);
 $('#acctBtn').addEventListener('click', ()=> auth.session ? openFoyer() : openLogin());
 
 $('#pickWeekBtn').addEventListener('click', ()=>{
+  const cur = isoWeek(ANCHOR), now = isoWeek(new Date()).year;
+  const years = Array.from(new Set([now-1, now, now+1, cur.year])).sort((a,b)=>a-b);
   openModal(`
     <h2>Aller à une semaine</h2>
     <label class="f">Année</label>
-    <select id="goYear">${[isoWeek(new Date()).year-1, isoWeek(new Date()).year, isoWeek(new Date()).year+1].map(y=>`<option${y===isoWeek(ANCHOR).year?' selected':''}>${y}</option>`).join('')}</select>
+    <select id="goYear">${years.map(y=>`<option${y===cur.year?' selected':''}>${y}</option>`).join('')}</select>
     <label class="f">Semaine</label>
-    <select id="goWeek">${Array.from({length:53},(_,i)=>i+1).map(w=>`<option value="${w}"${w===isoWeek(ANCHOR).week?' selected':''}>Semaine ${w}</option>`).join('')}</select>
+    <select id="goWeek"></select>
     <div class="foot"><button class="btn ghost" data-act="closemodal">Annuler</button><button class="btn" id="goOk">Y aller</button></div>
   `);
+  /* 52 ou 53 semaines selon l'année choisie */
+  const fillWeeks = ()=>{
+    const y = parseInt($('#goYear').value,10);
+    const keep = Math.min(parseInt($('#goWeek').value,10) || cur.week, weeksInYear(y));
+    $('#goWeek').innerHTML = Array.from({length:weeksInYear(y)},(_,i)=>i+1)
+      .map(w=>`<option value="${w}"${w===keep?' selected':''}>Semaine ${w}</option>`).join('');
+  };
+  fillWeeks();
+  $('#goYear').addEventListener('change', fillWeeks);
   $('#goOk').addEventListener('click', ()=>{
     ANCHOR = mondayOfWeek(parseInt($('#goYear').value,10), parseInt($('#goWeek').value,10));
     closeModal(); render();
@@ -1439,7 +1476,7 @@ $('#weekToCart').addEventListener('click', ()=>{
   document.querySelector('nav.tabs button[data-v="shop"]').classList.add('on');
   $$('.view').forEach(v=>v.classList.remove('on'));
   $('#v-shop').classList.add('on');
-  renderWeekSelect(); renderImport();
+  renderWeekSelect(true); renderImport();
   window.scrollTo({top:0});
 });
 
