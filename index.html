@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#FDF6F0">
 <title>Mes Recettes — Calendrier &amp; Courses</title>
+<script src="config.js"></script>
 <style>
   :root{
     --cream:#FDF6F0;
@@ -466,12 +467,15 @@ const store = {
 /* ============================================================
    SYNCHRONISATION MULTI-APPAREILS (Supabase — optionnel)
    ------------------------------------------------------------
-   Renseigne les deux constantes ci-dessous pour que plusieurs
-   appareils partagent les mêmes données.
+   Les identifiants sont désormais dans le fichier config.js,
+   chargé juste avant ce script (voir <head> / fin du <body>).
+   Si ce fichier est absent ou vide, l'app fonctionne quand même
+   en local uniquement (localStorage), sans erreur.
    ============================================================ */
-const SUPABASE_URL = 'https://daqvcpasenudmhwemsvk.supabase.co';        // ex. https://xxxxxxxx.supabase.co
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRhcXZjcGFzZW51ZG1od2Vtc3ZrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAzNDE5NTcsImV4cCI6MjEwNTkxNzk1N30.KmlIEt-DrYjKPttAEoN5JR62y54BrpKtta29CjVdXRk';        // clé publique « anon »
-const ROOM = 'foyerRatMic';     // doit être identique sur tous les appareils
+const cfg = (typeof APP_CONFIG !== 'undefined') ? APP_CONFIG : {};
+const SUPABASE_URL = cfg.SUPABASE_URL || '';
+const SUPABASE_KEY = cfg.SUPABASE_KEY || '';
+const ROOM         = cfg.ROOM || 'notre-foyer';
 
 const cloud = {
   on: false, timer:null, applying:false,
