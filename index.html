@@ -163,7 +163,7 @@
   /* ---------- Forms ---------- */
   label.f{display:block;font-size:12.5px;font-weight:600;color:var(--ink-soft);margin:12px 0 5px;letter-spacing:.2px}
   label.f:first-child{margin-top:0}
-  input[type=text],input[type=number],input[type=search],select,textarea{
+  input[type=text],input[type=email],input[type=number],input[type=search],select,textarea{
     width:100%;padding:11px 12px;border:1.5px solid var(--line);border-radius:12px;
     background:var(--cream);color:var(--ink);outline:none;transition:border-color .15s,background .15s;
   }
@@ -246,6 +246,17 @@
     display:inline-block;font-size:10px;font-weight:700;background:var(--rose-deep);color:#fff;
     border-radius:7px;padding:1px 7px;margin-right:5px;vertical-align:1px;
   }
+  .acct{
+    display:flex;align-items:center;gap:6px;flex:none;max-width:46%;
+    border:1px solid var(--line);background:var(--white);border-radius:12px;
+    padding:6px 10px;font-size:12px;font-weight:600;color:var(--rose-deep);cursor:pointer;
+  }
+  .acct[hidden]{display:none}
+  .acct svg{width:17px;height:17px;flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round}
+  .acct span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .acct.off{color:#9A7238;background:#FBF1E4;border-color:#F3E2C8}
+  input.code{letter-spacing:6px;text-align:center;font-size:22px;font-weight:650}
+  .err{color:#C0586C;font-size:13px;margin-top:8px;min-height:1em}
   details.help summary{cursor:pointer;font-size:13.5px;font-weight:600;color:var(--rose-deep);padding:4px 0}
   details.help code{font-size:12px;background:var(--cream-2);padding:1px 5px;border-radius:6px;overflow-wrap:anywhere}
   details.help pre{background:var(--cream-2);padding:10px;border-radius:10px;overflow-x:auto;font-size:11.5px;line-height:1.5}
@@ -256,10 +267,14 @@
 <header class="app">
   <div class="brand">
     <span class="dot"></span>
-    <div>
+    <div style="flex:1;min-width:0">
       <h1>Mes Recettes</h1>
       <small>Calendrier · Catalogue · Liste de courses</small>
     </div>
+    <button class="acct" id="acctBtn" hidden aria-label="Mon compte et mon foyer">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>
+      <span id="acctLab">Connexion</span>
+    </button>
   </div>
 </header>
 
@@ -434,6 +449,10 @@ function mondayOfWeek(year, week){
   mon.setHours(0,0,0,0);
   return mon;
 }
+/* --- nombre de semaines ISO d'une année (52 ou 53, ex. 2026 en a 53) --- */
+function weeksInYear(year){
+  return isoWeek(new Date(year, 11, 28)).week;
+}
 function addDays(d, n){
   const x = new Date(d); x.setDate(x.getDate()+n); x.setHours(0,0,0,0); return x;
 }
@@ -461,62 +480,374 @@ const store = {
   save(){
     this.saveLocal();
     if (cloud.on) cloud.put();
+    else if (auth.session) cloud.pending = true;     // hors ligne : à envoyer au retour du réseau
   }
 };
 
 /* ============================================================
    SYNCHRONISATION MULTI-APPAREILS (Supabase — optionnel)
    ------------------------------------------------------------
-   Les identifiants sont désormais dans le fichier config.js,
-   chargé juste avant ce script (voir <head> / fin du <body>).
-   Si ce fichier est absent ou vide, l'app fonctionne quand même
-   en local uniquement (localStorage), sans erreur.
+   Les identifiants sont dans config.js. Chaque personne se
+   connecte avec son e-mail (code reçu par mail, ou lien), puis
+   partage les données des « foyers » dont elle est membre.
+   Si config.js est vide, l'app fonctionne en local uniquement.
    ============================================================ */
 const cfg = (typeof APP_CONFIG !== 'undefined') ? APP_CONFIG : {};
-const SUPABASE_URL = cfg.SUPABASE_URL || '';
+const SUPABASE_URL = (cfg.SUPABASE_URL || '').replace(/\/+$/,'');
 const SUPABASE_KEY = cfg.SUPABASE_KEY || '';
-const ROOM         = cfg.ROOM || 'notre-foyer';
+const PREF_FOYER   = cfg.ROOM || '';            // foyer choisi par défaut si on est membre de plusieurs
+const CLOUD_OK     = !!(SUPABASE_URL && SUPABASE_KEY);
+const LS_SESSION   = 'mesrecettes.session';
+const LS_FOYER     = 'mesrecettes.foyer';
+const LS_LOCALONLY = 'mesrecettes.localonly';
 
-const cloud = {
-  on: false, timer:null, applying:false,
-  headers(){
-    return { 'apikey':SUPABASE_KEY, 'Authorization':'Bearer '+SUPABASE_KEY, 'Content-Type':'application/json' };
+/* ---------- connexion (API Supabase Auth, sans librairie externe) ---------- */
+const auth = {
+  session: null, _refreshing: null,
+  load(){
+    try{ this.session = JSON.parse(localStorage.getItem(LS_SESSION)); }catch(e){ this.session = null; }
   },
-  base(){ return SUPABASE_URL.replace(/\/+$/,'') + '/rest/v1/recettes_app?id=eq.' + encodeURIComponent(ROOM); },
-  async pull(){
-    const r = await fetch(this.base()+'&select=data', { headers:this.headers() });
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    const rows = await r.json();
-    if(rows.length && rows[0].data){
-      this.applying = true;
-      state = Object.assign({recipes:[],plan:{},shopping:[]}, rows[0].data);
-      store.saveLocal();
-      this.applying = false;
-      render();
-    } else {
-      await this.put();                       // premier appareil : on publie l'existant
+  save(s){
+    this.session = s ? {
+      access_token:  s.access_token,
+      refresh_token: s.refresh_token,
+      expires_at:    Number(s.expires_at) || (Math.floor(Date.now()/1000) + (Number(s.expires_in) || 3600)),
+      email:         String((s.user && s.user.email) || s.email || '').toLowerCase()
+    } : null;
+    if(this.session) localStorage.setItem(LS_SESSION, JSON.stringify(this.session));
+    else localStorage.removeItem(LS_SESSION);
+  },
+  get email(){ return this.session ? this.session.email : ''; },
+  async call(path, body, token){
+    const r = await fetch(SUPABASE_URL + '/auth/v1/' + path, {
+      method: 'POST',
+      headers: Object.assign({ apikey:SUPABASE_KEY, 'Content-Type':'application/json' }, token ? { Authorization:'Bearer '+token } : {}),
+      body: JSON.stringify(body || {})
+    });
+    const j = await r.json().catch(()=>({}));
+    if(!r.ok) throw Object.assign(new Error(j.msg || j.error_description || j.message || ('HTTP '+r.status)), { status:r.status });
+    return j;
+  },
+  /* envoie l'e-mail contenant le code (et le lien) de connexion */
+  sendCode(email){
+    const back = location.origin + location.pathname;
+    return this.call('otp?redirect_to=' + encodeURIComponent(back), { email, create_user:true });
+  },
+  async verify(email, token){
+    const s = await this.call('verify', { type:'email', email, token });
+    s.email = email; this.save(s); return s;
+  },
+  /* retour depuis le lien de l'e-mail : l'adresse contient #access_token=…&refresh_token=… */
+  async fromUrl(){
+    if(!location.hash) return false;
+    const h = new URLSearchParams(location.hash.slice(1));
+    const clean = () => history.replaceState(null, '', location.pathname + location.search);
+    if(h.get('error_description')){ clean(); throw new Error(h.get('error_description')); }
+    if(!h.get('access_token')) return false;
+    clean();
+    const s = { access_token:h.get('access_token'), refresh_token:h.get('refresh_token'),
+                expires_in:h.get('expires_in'), expires_at:h.get('expires_at') };
+    const r = await fetch(SUPABASE_URL + '/auth/v1/user', { headers:{ apikey:SUPABASE_KEY, Authorization:'Bearer '+s.access_token } });
+    if(!r.ok) throw new Error('Lien invalide');
+    s.user = await r.json();
+    this.save(s); return true;
+  },
+  /* jeton valide (rafraîchi automatiquement quand il expire) */
+  async token(){
+    if(!this.session) return null;
+    if(this.session.expires_at - 60 > Date.now()/1000) return this.session.access_token;
+    if(!this._refreshing){
+      const email = this.email;
+      this._refreshing = this.call('token?grant_type=refresh_token', { refresh_token:this.session.refresh_token })
+        .then(s => { s.email = email; this.save(s); })
+        .catch(e => { if(e.status >= 400 && e.status < 500) this.save(null); throw e; })   // session révoquée
+        .finally(() => { this._refreshing = null; });
     }
+    await this._refreshing;
+    return this.session && this.session.access_token;
   },
-  async put(){
-    clearTimeout(this.timer);
-    this.timer = setTimeout(async ()=>{
-      try{
-        await fetch(SUPABASE_URL.replace(/\/+$/,'') + '/rest/v1/recettes_app', {
-          method:'POST',
-          headers: Object.assign(this.headers(), { 'Prefer':'resolution=merge-duplicates' }),
-          body: JSON.stringify([{ id: ROOM, data: state, updated_at: new Date().toISOString() }])
-        });
-      }catch(e){ /* hors ligne : l'état local reste valable */ }
-    }, 700);
-  },
-  async init(){
-    if(!SUPABASE_URL || !SUPABASE_KEY) return;
-    try{ await this.pull(); this.on = true; }
-    catch(e){ this.on = false; toast('Synchronisation indisponible — données enregistrées localement'); }
-    paintSync();
+  async logout(){
+    const t = this.session && this.session.access_token;
+    this.save(null);
+    if(t){ try{ await this.call('logout', {}, t); }catch(e){} }
   }
 };
-function addLoop(){ $$('.view').forEach(v=>v.classList.remove('on')); $('#v-' + b.dataset.v).classList.add('on'); }
+
+/* ---------- accès à la base avec le jeton de la personne connectée ---------- */
+async function db(path, opts = {}){
+  const t = await auth.token();
+  if(!t) throw Object.assign(new Error('Non connecté'), { status:401 });
+  const r = await fetch(SUPABASE_URL + '/rest/v1/' + path, Object.assign({}, opts, {
+    headers: Object.assign({ apikey:SUPABASE_KEY, Authorization:'Bearer '+t, 'Content-Type':'application/json' }, opts.headers || {})
+  }));
+  if(!r.ok){
+    const j = await r.json().catch(()=>({}));
+    throw Object.assign(new Error(j.message || ('HTTP '+r.status)), { status:r.status, code:j.code });
+  }
+  const txt = await r.text();
+  return txt ? JSON.parse(txt) : null;
+}
+
+/* ---------- données partagées du foyer ---------- */
+const cloud = {
+  on:false, foyer:'', foyers:[], timer:null, pending:false, warned:false,
+  async pull(){
+    const rows = await db('recettes_app?select=data&id=eq.' + encodeURIComponent(this.foyer));
+    if(rows && rows.length && rows[0].data){
+      state = Object.assign({ recipes:[], plan:{}, shopping:[], eaters:[] }, rows[0].data);
+      migrer();
+      store.saveLocal();
+      render();
+    } else if(!(await this.flush())){       // foyer tout neuf : on y publie les données de cet appareil
+      throw new Error('Envoi impossible');
+    }
+  },
+  put(){
+    clearTimeout(this.timer);
+    this.pending = true;
+    this.timer = setTimeout(()=> this.flush(), 700);
+  },
+  async flush(){
+    clearTimeout(this.timer);
+    if(!this.foyer) return false;
+    try{
+      await db('recettes_app', {
+        method: 'POST',
+        headers: { Prefer:'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify([{ id:this.foyer, data:state, updated_at:new Date().toISOString() }])
+      });
+      this.pending = false; this.warned = false;
+      return true;
+    }catch(e){
+      /* hors ligne : l'état local reste valable, on renverra à la prochaine occasion */
+      if(!this.warned){ this.warned = true; toast('Envoi vers le cloud impossible — modifications gardées en local'); }
+      return false;
+    }
+  },
+  /* trouve le(s) foyer(s) de la personne connectée, puis charge les données */
+  async start(){
+    this.on = false;
+    if(!auth.session){ paintAccount(); renderWeek(); return; }
+    try{
+      const rows = await db('foyer_membres?select=foyer_id&email=eq.' + encodeURIComponent(auth.email));
+      this.foyers = Array.from(new Set((rows || []).map(r => r.foyer_id))).sort((a,b)=>a.localeCompare(b,'fr'));
+      const saved = localStorage.getItem(LS_FOYER);
+      const next = [saved, PREF_FOYER].find(f => f && this.foyers.includes(f)) || this.foyers[0] || '';
+      const sameFoyer = next && next === this.foyer;
+      this.foyer = next;
+      if(!this.foyer){ paintAccount(); renderWeek(); openFoyer(); return; }
+      localStorage.setItem(LS_FOYER, this.foyer);
+      /* modifs faites hors ligne sur ce même foyer : on les envoie plutôt que de les écraser */
+      if(this.pending && sameFoyer){ if(!(await this.flush())) throw new Error('Hors ligne'); }
+      else { this.pending = false; await this.pull(); }
+      this.on = true;
+    }catch(e){
+      if(!auth.session){ toast('Session expirée — reconnecte-toi'); openLogin(); }
+      else toast('Synchronisation indisponible — données enregistrées localement');
+    }
+    paintAccount(); renderWeek();
+  }
+};
+
+async function initCloud(){
+  if(!CLOUD_OK) return;                         // pas de Supabase configuré : 100 % local
+  $('#acctBtn').hidden = false;
+  auth.load();
+  try{ await auth.fromUrl(); }catch(e){ toast('Lien de connexion invalide ou expiré'); }
+  if(auth.session) await cloud.start();
+  else{
+    paintAccount();
+    if(localStorage.getItem(LS_LOCALONLY) !== '1') openLogin();
+  }
+  /* retour sur l'app (autre onglet, téléphone déverrouillé…) : on envoie nos
+     modifs en attente, puis on récupère celles des autres membres du foyer */
+  document.addEventListener('visibilitychange', async ()=>{
+    if(document.visibilityState === 'hidden'){ if(cloud.on && cloud.pending) cloud.flush(); return; }
+    if(!auth.session){                          // connecté entre-temps dans un autre onglet (lien de l'e-mail)
+      auth.load();
+      if(auth.session){ closeModal(); await cloud.start(); }
+      return;
+    }
+    if(!cloud.on){ await cloud.start(); return; }
+    if(cloud.pending) await cloud.flush();
+    if(!cloud.pending && !$('#modal').classList.contains('on')){
+      try{ await cloud.pull(); }catch(e){}
+    }
+  });
+  window.addEventListener('storage', async e=>{
+    if(e.key === LS_SESSION){
+      auth.load();
+      if(auth.session && !cloud.on){ closeModal(); await cloud.start(); }
+    }
+  });
+}
+
+function paintAccount(){
+  if(!CLOUD_OK) return;
+  $('#acctBtn').classList.toggle('off', !cloud.on);
+  $('#acctLab').textContent = !auth.session ? 'Se connecter' : (cloud.foyer || 'Mon foyer');
+}
+function paintSync(){ paintAccount(); renderWeek(); }
+
+/* ---------- écrans de connexion ---------- */
+function openLogin(email = ''){
+  openModal(`
+    <h2>Connexion</h2>
+    <div class="muted" style="margin-bottom:6px">Connecte-toi avec ton adresse e-mail pour partager recettes, calendrier et courses avec ton foyer, sur tous tes appareils. Pas de mot de passe : tu reçois un code par e-mail.</div>
+    <form id="loginForm" autocomplete="on">
+      <label class="f">Adresse e-mail</label>
+      <input type="email" id="lEmail" required autocomplete="email" inputmode="email" placeholder="prenom@exemple.fr" value="${esc(email)}">
+      <div class="err" id="lErr"></div>
+      <div class="foot">
+        <button type="button" class="btn ghost" data-act="localonly">Plus tard</button>
+        <button type="submit" class="btn" id="lGo">Recevoir le code</button>
+      </div>
+    </form>
+  `);
+  $('#loginForm').addEventListener('submit', async ev=>{
+    ev.preventDefault();
+    const mail = $('#lEmail').value.trim().toLowerCase();
+    if(!mail) return;
+    $('#lGo').disabled = true; $('#lGo').textContent = 'Envoi…'; $('#lErr').textContent = '';
+    try{ await auth.sendCode(mail); openCode(mail); }
+    catch(e){
+      $('#lErr').textContent = /rate|security purposes|seconds/i.test(e.message)
+        ? 'Trop de demandes rapprochées : patiente un peu avant de redemander un code.'
+        : 'Envoi impossible : ' + e.message;
+      $('#lGo').disabled = false; $('#lGo').textContent = 'Recevoir le code';
+    }
+  });
+}
+function openCode(email){
+  openModal(`
+    <h2>Vérifie tes e-mails</h2>
+    <div class="muted" style="margin-bottom:6px">Un e-mail vient d’être envoyé à <b>${esc(email)}</b>. Saisis le code reçu, ou clique sur le lien de l’e-mail depuis cet appareil. Pense à regarder dans les spams.</div>
+    <form id="codeForm">
+      <label class="f">Code reçu</label>
+      <input type="text" id="lCode" class="code" required inputmode="numeric" autocomplete="one-time-code" maxlength="12" placeholder="••••••">
+      <div class="err" id="lErr"></div>
+      <div class="foot">
+        <button type="button" class="btn ghost" data-act="relogin" data-email="${esc(email)}">Changer d’adresse</button>
+        <button type="submit" class="btn" id="cGo">Valider</button>
+      </div>
+    </form>
+  `);
+  $('#lCode').focus();
+  $('#codeForm').addEventListener('submit', async ev=>{
+    ev.preventDefault();
+    const code = $('#lCode').value.replace(/\D/g,'');
+    if(!code) return;
+    $('#cGo').disabled = true; $('#lErr').textContent = '';
+    try{
+      await auth.verify(email, code);
+      localStorage.removeItem(LS_LOCALONLY);
+      closeModal(); toast('Connecté·e');
+      await cloud.start();
+    }catch(e){
+      $('#lErr').textContent = 'Code invalide ou expiré.';
+      $('#cGo').disabled = false;
+    }
+  });
+}
+
+/* ---------- « Mon foyer » : membres, invitations, déconnexion ---------- */
+async function openFoyer(){
+  if(!auth.session){ openLogin(); return; }
+  openModal(`
+    <h2>Mon foyer</h2>
+    <div class="muted">Connecté·e : <b>${esc(auth.email)}</b></div>
+    <div id="foyerBody" style="margin-top:6px"><div class="muted" style="margin-top:12px">Chargement…</div></div>
+    <div class="foot">
+      <button class="btn ghost" data-act="closemodal">Fermer</button>
+      <button class="btn danger" data-act="logout">Se déconnecter</button>
+    </div>
+  `);
+  const body = $('#foyerBody');
+
+  if(!cloud.foyer){
+    body.innerHTML = `
+      <div class="empty" style="padding:16px;margin:12px 0">Ton adresse n’est rattachée à aucun foyer.<br>
+        <span class="muted">Demande à un membre de t’inviter avec cette adresse, ou crée un nouveau foyer.</span></div>
+      <button class="btn ghost block" data-act="refoyer">J’ai été invité·e — réessayer</button>
+      <label class="f">Créer un nouveau foyer</label>
+      <div class="row">
+        <input type="text" id="newFoyer" placeholder="Ex. famille-dupont" style="flex:1">
+        <button class="btn sm" id="newFoyerOk" style="flex:none">Créer</button>
+      </div>
+      <div class="err" id="fErr"></div>`;
+    $('#newFoyerOk').addEventListener('click', async ()=>{
+      const nom = $('#newFoyer').value.trim();
+      if(nom.length < 3){ $('#fErr').textContent = 'Choisis un nom d’au moins 3 caractères.'; return; }
+      try{
+        await db('rpc/creer_foyer', { method:'POST', body:JSON.stringify({ nom }) });
+        if(!confirm('Copier dans ce nouveau foyer les recettes déjà présentes sur cet appareil ?\n(Annuler = foyer vide)')){
+          state = { recipes:[], plan:{}, shopping:[], eaters:[] }; store.saveLocal(); render();
+        }
+        localStorage.setItem(LS_FOYER, nom);
+        await cloud.start();
+        if(cloud.foyer) openFoyer();
+        toast('Foyer créé');
+      }catch(e){
+        $('#fErr').textContent = /déjà pris/.test(e.message) ? 'Ce nom de foyer est déjà pris.' : 'Création impossible : ' + e.message;
+      }
+    });
+    return;
+  }
+
+  try{
+    const rows = await db('foyer_membres?select=email&order=email&foyer_id=eq.' + encodeURIComponent(cloud.foyer));
+    body.innerHTML = `
+      <label class="f">Foyer</label>
+      ${cloud.foyers.length > 1
+        ? `<select id="foyerSel">${cloud.foyers.map(f=>`<option value="${esc(f)}"${f===cloud.foyer?' selected':''}>${esc(f)}</option>`).join('')}</select>`
+        : `<div style="font-weight:650">${esc(cloud.foyer)} <span class="pill ${cloud.on?'cloud':'local'}" style="margin-left:6px">${cloud.on?'synchronisé':'hors ligne'}</span></div>`}
+      <label class="f">Membres</label>
+      <div class="card" style="padding:4px 12px;box-shadow:none;margin:0">
+        ${(rows||[]).map(r=>`
+          <div class="shopitem">
+            <div class="txt">${esc(r.email)}${r.email===auth.email?' <small>c’est toi</small>':''}</div>
+            ${r.email===auth.email ? '' : `<button class="x" data-act="delmembre" data-email="${esc(r.email)}" aria-label="Retirer">×</button>`}
+          </div>`).join('')}
+      </div>
+      <label class="f">Inviter quelqu’un</label>
+      <div class="row">
+        <input type="email" id="invEmail" placeholder="adresse@exemple.fr" autocomplete="off" style="flex:1">
+        <button class="btn sm" id="invOk" style="flex:none">Inviter</button>
+      </div>
+      <div class="err" id="fErr"></div>
+      <div class="muted">Aucun e-mail d’invitation n’est envoyé : préviens la personne qu’elle peut maintenant se connecter à l’app avec cette adresse.</div>`;
+    const sel = $('#foyerSel');
+    if(sel) sel.addEventListener('change', async ()=>{
+      if(cloud.pending) await cloud.flush();
+      localStorage.setItem(LS_FOYER, sel.value);
+      await cloud.start(); openFoyer();
+    });
+    const invite = async ()=>{
+      const mail = $('#invEmail').value.trim().toLowerCase();
+      if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)){ $('#fErr').textContent = 'Adresse e-mail invalide.'; return; }
+      try{
+        await db('foyer_membres', { method:'POST', headers:{ Prefer:'return=minimal' }, body:JSON.stringify({ foyer_id:cloud.foyer, email:mail }) });
+        toast(mail + ' fait maintenant partie du foyer'); openFoyer();
+      }catch(e){
+        $('#fErr').textContent = e.status === 409 ? 'Cette personne est déjà membre.' : 'Invitation impossible : ' + e.message;
+      }
+    };
+    $('#invOk').addEventListener('click', invite);
+    $('#invEmail').addEventListener('keydown', e=>{ if(e.key === 'Enter'){ e.preventDefault(); invite(); }});
+  }catch(e){
+    body.innerHTML = `<div class="err" style="margin-top:12px">Impossible de charger le foyer (${esc(e.message)}).</div>`;
+  }
+}
+async function doLogout(){
+  if(!confirm('Se déconnecter ?\nLes données du foyer seront retirées de cet appareil (elles restent en ligne pour les autres membres).')) return;
+  if(cloud.on && cloud.pending) await cloud.flush();
+  await auth.logout();
+  cloud.on = false; cloud.foyer = ''; cloud.foyers = []; cloud.pending = false;
+  localStorage.removeItem(LS_FOYER);
+  localStorage.removeItem(LS);
+  store.local(); render(); paintAccount();
+  openLogin();
+}
 
 /* ============================================================
    OUTILS "RECETTES DANS LE PLAN"
@@ -558,7 +889,7 @@ function migrer(){
 function knownEaters(){
   const used = new Set(state.eaters);
   Object.keys(state.plan).forEach(k=>{
-    SLOTS.forEach(s => ((state.plan[k][s])||[]).forEach(e=>{ const w = whoOf(e); if(w) used.add(w); }));
+    SLOTS.forEach(s => ((state.plan[k] || {})[s.k] || []).forEach(e=>{ const w = whoOf(e); if(w) used.add(w); }));
   });
   return Array.from(used).sort((a,b)=>a.localeCompare(b,'fr'));
 }
@@ -665,41 +996,49 @@ function renderShop(){
     </div>`).join('')
     : `<div class="empty">Ta liste est vide.<br><span class="muted">Ajoute un produit, ou importe les ingrédients d’une semaine du calendrier.</span></div>`;
 }
+let selYear = null;                            // année autour de laquelle la liste a été construite
 function renderWeekSelect(){
   const { week, year } = isoWeek(ANCHOR);
   const sel = $('#impWeek');
-  if(!sel.options.length){
+  if(selYear !== year){                        // reconstruit si on a changé d'année
     const opts = [];
     for(let y = year-1; y <= year+1; y++){
-      for(let w = 1; w <= 52; w++){
+      for(let w = 1; w <= weeksInYear(y); w++){
         const mon = mondayOfWeek(y,w);
         opts.push(`<option value="${y}-${w}">Semaine ${w} — ${y} · du ${fmtDate(mon)} au ${fmtDate(addDays(mon,6))}</option>`);
       }
     }
     sel.innerHTML = opts.join('');
+    selYear = year;
   }
   sel.value = year + '-' + week;
+}
+/* recettes (uniques) et ingrédients regroupés d'une semaine ISO */
+function weekIngredients(y, w){
+  const mon = mondayOfWeek(y,w);
+  const dates = DAYS.map((_,i)=> addDays(mon,i));
+  const ids = dates.flatMap(d => recipesOfDay(isoOf(d)).map(eidOf));
+  const recipes = Array.from(new Set(ids)).map(findRecipe).filter(Boolean);
+  const groups = {};
+  recipes.forEach(r => (r.ingredients||[]).forEach(i=>{
+    const unit = i.unit || '';
+    const k = i.name.trim().toLowerCase() + '|' + unit;     // 200 g et 1 botte ne s'additionnent pas
+    if(!groups[k]) groups[k] = { name:i.name.trim(), qty:0, unit, src:new Set() };
+    groups[k].qty = Math.round((groups[k].qty + (Number(i.qty)||0)) * 100) / 100;
+    groups[k].src.add(r.name);
+  }));
+  const keys = Object.keys(groups).sort((a,b)=>a.localeCompare(b,'fr'));
+  return { recipes, groups, keys };
 }
 function renderImport(){
   const v = $('#impWeek').value; if(!v) return;
   const [y,w] = v.split('-').map(Number);
-  const mon = mondayOfWeek(y,w);
-  const dates = DAYS.map((_,i)=> addDays(mon,i));
-  const recipes = dates.flatMap(d => recipesOfDay(isoOf(d)));
-  const uniq = Array.from(new Set(recipes)).map(findRecipe).filter(Boolean);
+  const { recipes:uniq, groups, keys } = weekIngredients(y, w);
 
   if(!uniq.length){
     $('#impPreview').innerHTML = `<div class="empty" style="padding:16px">Aucune recette programmée cette semaine-là.</div>`;
     return;
   }
-  const groups = {};
-  uniq.forEach(r => (r.ingredients||[]).forEach(i=>{
-    const k = i.name.trim().toLowerCase();
-    if(!groups[k]) groups[k] = { name:i.name.trim(), qty:0, unit:i.unit||'', src:new Set() };
-    groups[k].qty += Number(i.qty)||0;
-    groups[k].src.add(r.name);
-  }));
-  const keys = Object.keys(groups).sort((a,b)=>a.localeCompare(b,'fr'));
   $('#impPreview').innerHTML = `
     <div class="muted" style="margin-bottom:8px">${uniq.length} recette${uniq.length>1?'s':''} · ${keys.length} produit${keys.length>1?'s':''}</div>
     <div style="margin-bottom:10px">${uniq.map(r=>`<span class="tag" style="margin:0 4px 4px 0">${esc(r.name)}</span>`).join('')}</div>
@@ -742,7 +1081,7 @@ let pickerCtx = null;
 function openPicker(dateKey, slot){
   pickerCtx = { dateKey, slot };
   const day = state.plan[dateKey] || {};
-  const already = day[slot] || [];
+  const already = (day[slot] || []).map(eidOf);
   openModal(`
     <h2>Ajouter au ${DAYS[(new Date(dateKey+'T12:00:00').getDay()+6)%7].toLowerCase()} ${SLOTS.find(s=>s.k===slot).l.toLowerCase()}</h2>
     <div class="searchwrap">
@@ -790,7 +1129,7 @@ function openRecipe(id){
 function ingredientRow(name='', qty='', unit='g'){
   return `<div class="ingline">
     <input type="text" class="i-name" placeholder="Ingrédient" value="${esc(name)}">
-    <input type="number" class="i-qty" min="1" step="1" placeholder="Qté" value="${qty}">
+    <input type="number" class="i-qty" min="0" step="any" inputmode="decimal" placeholder="Qté" value="${esc(qty ?? '')}">
     <select class="i-unit">${UNITS.map(u=>`<option value="${u.k}"${u.k===unit?' selected':''}>${esc(u.l)}</option>`).join('')}</select>
     <button class="x" data-act="deling" aria-label="Retirer la ligne">×</button>
   </div>`;
@@ -834,9 +1173,9 @@ function openRecipeForm(id){
     if(!(duration > 0)){ toast('La durée doit être un nombre entier positif'); return; }
     const ingredients = Array.from($$('#ingWrap .ingline')).map(line=>{
       const n = line.querySelector('.i-name').value.trim();
-      const q = parseInt(line.querySelector('.i-qty').value,10);
+      const q = parseFloat(String(line.querySelector('.i-qty').value).replace(',', '.'));
       const u = line.querySelector('.i-unit').value;
-      return n ? { name:n, qty: (q>0?q:1), unit:u } : null;
+      return n ? { name:n, qty: (q>0 ? q : ''), unit:u } : null;     // quantité vide = « selon le goût »
     }).filter(Boolean);
     const tags = $('#rTags').value.split(',').map(t=>t.trim()).filter(Boolean);
     const uniqTags = Array.from(new Set(tags));
@@ -939,22 +1278,12 @@ function openEaterForm(){
 function doImport(mode){
   const v = $('#impWeek').value; if(!v) return;
   const [y,w] = v.split('-').map(Number);
-  const mon = mondayOfWeek(y,w);
-  const dates = DAYS.map((_,i)=> addDays(mon,i));
-  const recipes = Array.from(new Set(dates.flatMap(d => recipesOfDay(isoOf(d))))).map(findRecipe).filter(Boolean);
+  const { recipes, groups, keys } = weekIngredients(y, w);
   if(!recipes.length){ toast('Aucune recette cette semaine-là'); return; }
 
-  const groups = {};
-  recipes.forEach(r => (r.ingredients||[]).forEach(i=>{
-    const k = i.name.trim().toLowerCase();
-    if(!groups[k]) groups[k] = { name:i.name.trim(), qty:0, src:new Set() };
-    groups[k].qty += Number(i.qty)||0;
-    groups[k].src.add(r.name);
-  }));
-
-  const items = Object.keys(groups).sort((a,b)=>a.localeCompare(b,'fr')).map(k=>({
+  const items = keys.map(k=>({
     id: uid(),
-    label: groups[k].name + (groups[k].qty ? ' — ' + groups[k].qty : ''),
+    label: groups[k].name + (groups[k].qty ? ' — ' + qtyLabel(groups[k].qty, groups[k].unit) : ''),
     key: k,
     src: 'Semaine ' + w + ' · ' + Array.from(groups[k].src).join(', '),
     done: false
@@ -1009,10 +1338,12 @@ document.addEventListener('click', e=>{
     case 'editrec': openRecipeForm(id); break;
     case 'planfrom': openSlotPicker(id); break;
     case 'delrec': {
+      const rr = findRecipe(id);
+      if(!confirm('Supprimer « ' + (rr ? rr.name : 'cette recette') + ' » ? Elle sera aussi retirée du calendrier.')) break;
       state.recipes = state.recipes.filter(r=>r.id!==id);
       Object.keys(state.plan).forEach(k=>{
         SLOTS.forEach(s=>{
-          if(state.plan[k][s]) state.plan[k][s] = state.plan[k][s].filter(x=>x!==id);
+          if(state.plan[k][s.k]) state.plan[k][s.k] = state.plan[k][s.k].filter(x=>eidOf(x)!==id);
         });
       });
       store.save(); closeModal(); render(); toast('Recette supprimée');
@@ -1030,12 +1361,25 @@ document.addEventListener('click', e=>{
     case 'delitem': state.shopping = state.shopping.filter(x=>x.id!==id); store.save(); renderShop(); break;
     case 'import': doImport(t.dataset.mode); break;
     case 'eater': openEaterForm(); break;
+    case 'localonly': localStorage.setItem(LS_LOCALONLY,'1'); closeModal(); toast('Données gardées sur cet appareil'); break;
+    case 'relogin': openLogin(t.dataset.email); break;
+    case 'logout': doLogout(); break;
+    case 'refoyer': cloud.start().then(()=>{ if(cloud.foyer) openFoyer(); }); break;
+    case 'delmembre': {
+      const mail = t.dataset.email;
+      if(!confirm('Retirer ' + mail + ' du foyer ?')) break;
+      db('foyer_membres?foyer_id=eq.' + encodeURIComponent(cloud.foyer) + '&email=eq.' + encodeURIComponent(mail), { method:'DELETE' })
+        .then(()=>{ toast('Membre retiré'); openFoyer(); })
+        .catch(err=>toast('Impossible : ' + err.message));
+      break;
+    }
+    case 'whofor': openWhofor(t.dataset.date, t.dataset.slot, id); break;
     case 'deleater': state.eaters = state.eaters.filter(x=>x!==t.dataset.name); store.save(); render(); toast('Profil retiré'); break;
     case 'doplanfor': {
       const key = t.dataset.date, slot = t.dataset.slot, rid = t.dataset.id;
       state.plan[key] = state.plan[key] || { midi:[], soir:[] };
       state.plan[key][slot] = state.plan[key][slot] || [];
-      const pos = state.plan[key][slot].indexOf(rid);
+      const pos = state.plan[key][slot].findIndex(e => eidOf(e) === rid);
       if(pos >= 0){
         const who = t.dataset.who || '';
         state.plan[key][slot][pos] = Object.assign({}, state.plan[key][slot][pos], { who });
@@ -1062,16 +1406,19 @@ $('#prevW').addEventListener('click', ()=>{ ANCHOR = addDays(ANCHOR,-7); render(
 $('#nextW').addEventListener('click', ()=>{ ANCHOR = addDays(ANCHOR,7); render(); });
 $('#prevW2').addEventListener('click', ()=>{
   const [y,w] = $('#impWeek').value.split('-').map(Number);
-  const prev = w>1 ? [y,w-1] : [y-1,52];
-  $('#impWeek').value = prev[0]+'-'+prev[1]; renderImport();
+  const prev = w>1 ? [y,w-1] : [y-1,weeksInYear(y-1)];
+  const v = prev[0]+'-'+prev[1];
+  if($('#impWeek').querySelector(`option[value="${v}"]`)){ $('#impWeek').value = v; renderImport(); }
 });
 $('#nextW2').addEventListener('click', ()=>{
   const [y,w] = $('#impWeek').value.split('-').map(Number);
-  const next = w<52 ? [y,w+1] : [y+1,1];
-  $('#impWeek').value = next[0]+'-'+next[1]; renderImport();
+  const next = w<weeksInYear(y) ? [y,w+1] : [y+1,1];
+  const v = next[0]+'-'+next[1];
+  if($('#impWeek').querySelector(`option[value="${v}"]`)){ $('#impWeek').value = v; renderImport(); }
 });
 $('#todayBtn').addEventListener('click', ()=>{ ANCHOR = new Date(); ANCHOR.setHours(0,0,0,0); render(); });
 $('#eatersBtn').addEventListener('click', openEaterForm);
+$('#acctBtn').addEventListener('click', ()=> auth.session ? openFoyer() : openLogin());
 
 $('#pickWeekBtn').addEventListener('click', ()=>{
   openModal(`
@@ -1079,7 +1426,7 @@ $('#pickWeekBtn').addEventListener('click', ()=>{
     <label class="f">Année</label>
     <select id="goYear">${[isoWeek(new Date()).year-1, isoWeek(new Date()).year, isoWeek(new Date()).year+1].map(y=>`<option${y===isoWeek(ANCHOR).year?' selected':''}>${y}</option>`).join('')}</select>
     <label class="f">Semaine</label>
-    <select id="goWeek">${Array.from({length:52},(_,i)=>i+1).map(w=>`<option value="${w}"${w===isoWeek(ANCHOR).week?' selected':''}>Semaine ${w}</option>`).join('')}</select>
+    <select id="goWeek">${Array.from({length:53},(_,i)=>i+1).map(w=>`<option value="${w}"${w===isoWeek(ANCHOR).week?' selected':''}>Semaine ${w}</option>`).join('')}</select>
     <div class="foot"><button class="btn ghost" data-act="closemodal">Annuler</button><button class="btn" id="goOk">Y aller</button></div>
   `);
   $('#goOk').addEventListener('click', ()=>{
@@ -1120,7 +1467,7 @@ $('#impWeek').addEventListener('change', renderImport);
 store.local();
 migrer();
 render();
-cloud.init();
+initCloud();
 </script>
 </body>
 </html>
