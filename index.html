@@ -171,6 +171,7 @@
   .day.past .dname,.day.past .dnum{color:#8A8F9C}
   .day.past .chip{background:rgba(255,255,255,.45);border-color:#D3CCBC;box-shadow:none}
   .day.past .chip .nm{color:#646B7A}
+  .slot-none{font-size:13px;color:#A8A294;padding:0 4px 4px}
   .day.past .addmini{background:transparent;color:#8A8F9C;border-color:#CFC8B8}
   .day.past .whobtn,.day.past .tag{opacity:.75}
   .day.past .whobtn{border-color:#CFC8B8}
@@ -510,6 +511,8 @@ function fmtDate(d){
   return d.toLocaleDateString('fr-FR',{day:'numeric',month:'short'});
 }
 /* --- date ISO locale (pas de décalage UTC) --- */
+/* jour déjà passé ? (dates ISO : l'ordre alphabétique est l'ordre chronologique) */
+function isPastKey(key){ return key < isoOf(new Date()); }
 function isoOf(d){
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 }
@@ -1238,7 +1241,7 @@ function renderWeek(){
               <button class="x" data-act="unplan" data-date="${key}" data-slot="${s.k}" data-id="${id}" aria-label="Retirer">×</button>
             </div>`;
           }).join('')}
-          <button class="addmini" data-act="plan" data-date="${key}" data-slot="${s.k}">+ Ajouter une recette</button>
+          ${isPast ? (list.length ? '' : '<div class="slot-none">—</div>') : `<button class="addmini" data-act="plan" data-date="${key}" data-slot="${s.k}">+ Ajouter une recette</button>`}
         </div>`;
     }).join('');
     return `<div class="day${isToday?' today':''}${isPast?' past':''}">
@@ -1510,8 +1513,12 @@ function openRecipeForm(id){
 
 /* ---- choisir un créneau pour planifier une recette ---- */
 function openSlotPicker(recipeId){
-  const dates = weekDates(ANCHOR);
-  const { week } = isoWeek(ANCHOR);
+  /* uniquement aujourd'hui et les jours à venir de la semaine affichée ;
+     si elle est entièrement passée, on propose la semaine en cours */
+  const today = new Date(); today.setHours(0,0,0,0);
+  const anchor = weekDates(ANCHOR)[6] < today ? today : ANCHOR;
+  const dates = weekDates(anchor).filter(d => !isPastKey(isoOf(d)));
+  const { week } = isoWeek(anchor);
   openModal(`
     <h2>Planifier cette recette</h2>
     <div class="muted" style="margin-bottom:12px">Semaine ${week} — choisis le jour et le moment.</div>
@@ -1643,6 +1650,7 @@ document.addEventListener('click', e=>{
       const key = t.dataset.date;
       const slot = t.dataset.slot || (pickerCtx && pickerCtx.slot);
       const date = key || (pickerCtx && pickerCtx.dateKey);
+      if(!date || isPastKey(date)){ closeModal(); toast('Ce jour est passé : impossible d’y ajouter une recette'); break; }
       state.plan[date] = state.plan[date] || { midi:[], soir:[] };
       state.plan[date].midi = state.plan[date].midi || [];
       state.plan[date].soir = state.plan[date].soir || [];
