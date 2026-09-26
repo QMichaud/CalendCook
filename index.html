@@ -616,7 +616,7 @@ const auth = {
   sendCode(email){
     let back = location.origin + location.pathname;
     /* depuis l'écran d'accueil, le lien s'ouvrira dans Safari : on y joint un identifiant
-       secret pour que Safari nous transmette la connexion (voir pair.* plus bas) */
+       secret pour que le navigateur nous transmette la connexion (voir pair.* plus bas) */
     if(STANDALONE) back += '?pair=' + pair.create();
     return this.call('otp?redirect_to=' + encodeURIComponent(back), { email, create_user:true });
   },
@@ -741,8 +741,8 @@ const cloud = {
 
 /* ---------- transfert de connexion Safari → app de l'écran d'accueil ----------
    Sur iPhone, l'app ajoutée à l'écran d'accueil ne partage pas ses données avec
-   Safari, où s'ouvre le lien de l'e-mail. L'app joint donc au lien un identifiant
-   secret ; Safari dépose la connexion sous cet identifiant (sans la garder), et
+   le navigateur (Safari, Chrome…), où s'ouvre le lien de l'e-mail. L'app joint donc au lien un identifiant
+   secret ; le navigateur dépose la connexion sous cet identifiant (sans la garder), et
    l'app vient la chercher. Fonctions SQL : deposer_session / recuperer_session. */
 const pair = {
   timer: null,
@@ -918,7 +918,7 @@ function openCode(email){
   openModal(`
     <h2>Vérifie tes e-mails</h2>
     <div class="muted" style="margin-bottom:6px">Un e-mail vient d’être envoyé à <b>${esc(email)}</b>. ${STANDALONE
-      ? 'Ouvre-le <b>sur cet appareil</b> et clique sur le lien : il s’ouvrira dans Safari. <b>Reviens ensuite ici</b>, la connexion se fera toute seule.'
+      ? 'Ouvre-le <b>sur cet appareil</b> et clique sur le lien : il s’ouvrira dans ton navigateur. <b>Reviens ensuite ici</b>, la connexion se fera toute seule.'
       : 'Ouvre-le <b>sur cet appareil</b> et clique sur le lien qu’il contient : l’app s’ouvrira et tu seras connecté·e.'} Pense à regarder dans les spams.</div>
     ${STANDALONE ? '<div class="muted" id="pairWait" style="margin:10px 0 0">⏳ En attente du lien…</div>' : ''}
     <div class="err" id="rErr"></div>
