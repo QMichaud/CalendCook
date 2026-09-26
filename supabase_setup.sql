@@ -116,6 +116,49 @@ grant execute on function public.quitter_foyer(text)   to authenticated;
 grant execute on function public.supprimer_foyer(text) to authenticated;
 grant execute on function public.est_membre(text)  to authenticated;
 
+-- 6 bis) Transfert de connexion vers l'app de l'écran d'accueil (iPhone)
+--   L'app installée sur l'écran d'accueil ne partage pas ses données avec
+--   Safari : quand le lien de l'e-mail s'ouvre dans Safari, Safari dépose ici
+--   la connexion sous un identifiant secret (64 caractères aléatoires, connu
+--   seulement de l'app et du lien), et l'app vient la chercher une seule fois.
+create table if not exists public.connexions_en_attente (
+  id            text        primary key,
+  access_token  text        not null,
+  refresh_token text        not null,
+  expires_at    bigint,
+  cree_le       timestamptz not null default now()
+);
+alter table public.connexions_en_attente enable row level security;   -- aucune règle : illisible directement
+revoke all on public.connexions_en_attente from anon, authenticated;
+
+create or replace function public.deposer_session(pair text, jeton text, jeton_refresh text, expire bigint)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if auth.jwt() ->> 'email' is null then raise exception 'Connexion requise'; end if;
+  if length(coalesce(pair, '')) < 32 then raise exception 'Identifiant invalide'; end if;
+  delete from public.connexions_en_attente where cree_le < now() - interval '15 minutes';
+  insert into public.connexions_en_attente (id, access_token, refresh_token, expires_at)
+    values (pair, jeton, jeton_refresh, expire)
+    on conflict (id) do nothing;
+end;
+$$;
+
+create or replace function public.recuperer_session(pair text)
+returns table (access_token text, refresh_token text, expires_at bigint)
+language sql security definer set search_path = public
+as $$
+  delete from public.connexions_en_attente c
+   where c.id = pair and c.cree_le > now() - interval '15 minutes'
+  returning c.access_token, c.refresh_token, c.expires_at;
+$$;
+
+revoke execute on function public.deposer_session(text, text, text, bigint) from anon, public;
+revoke execute on function public.recuperer_session(text)                  from public;
+grant  execute on function public.deposer_session(text, text, text, bigint) to authenticated;
+grant  execute on function public.recuperer_session(text)                  to anon, authenticated;
+
 -- 7) Recharge le cache de l'API pour que l'app voie tout de suite les fonctions
 notify pgrst, 'reload schema';
 

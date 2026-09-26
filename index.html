@@ -581,6 +581,9 @@ const CLOUD_OK     = !!(SUPABASE_URL && SUPABASE_KEY);
 const LS_SESSION   = 'mesrecettes.session';
 const LS_FOYER     = 'mesrecettes.foyer';
 const LS_LOCALONLY = 'mesrecettes.localonly';
+const LS_PAIR      = 'mesrecettes.pair';      // transfert de connexion en attente (app de l'écran d'accueil)
+/* app ouverte depuis l'écran d'accueil (et non dans Safari / un navigateur) */
+const STANDALONE   = window.navigator.standalone === true || !!(window.matchMedia && matchMedia('(display-mode: standalone)').matches);
 
 /* ---------- connexion (API Supabase Auth, sans librairie externe) ---------- */
 const auth = {
@@ -611,7 +614,10 @@ const auth = {
   },
   /* envoie l'e-mail contenant le lien (et le code, si le modèle d'e-mail l'inclut) */
   sendCode(email){
-    const back = location.origin + location.pathname;
+    let back = location.origin + location.pathname;
+    /* depuis l'écran d'accueil, le lien s'ouvrira dans Safari : on y joint un identifiant
+       secret pour que Safari nous transmette la connexion (voir pair.* plus bas) */
+    if(STANDALONE) back += '?pair=' + pair.create();
     return this.call('otp?redirect_to=' + encodeURIComponent(back), { email, create_user:true });
   },
   async verify(email, token){
@@ -619,7 +625,7 @@ const auth = {
     s.email = email; this.save(s); return s;
   },
   /* retour depuis le lien de l'e-mail : l'adresse contient #access_token=…&refresh_token=… */
-  async fromUrl(){
+  async fromUrl(keep = true){
     const h = new URLSearchParams(location.hash.slice(1));
     const q = new URLSearchParams(location.search);
     const clean = () => history.replaceState(null, '', location.pathname);
@@ -633,7 +639,8 @@ const auth = {
     const r = await fetch(SUPABASE_URL + '/auth/v1/user', { headers:{ apikey:SUPABASE_KEY, Authorization:'Bearer '+s.access_token } });
     if(!r.ok) throw new Error('Lien invalide');
     s.user = await r.json();
-    this.save(s); return true;
+    if(keep) this.save(s);
+    return s;
   },
   /* jeton valide (rafraîchi automatiquement quand il expire) */
   async token(){
@@ -732,16 +739,109 @@ const cloud = {
   }
 };
 
+/* ---------- transfert de connexion Safari → app de l'écran d'accueil ----------
+   Sur iPhone, l'app ajoutée à l'écran d'accueil ne partage pas ses données avec
+   Safari, où s'ouvre le lien de l'e-mail. L'app joint donc au lien un identifiant
+   secret ; Safari dépose la connexion sous cet identifiant (sans la garder), et
+   l'app vient la chercher. Fonctions SQL : deposer_session / recuperer_session. */
+const pair = {
+  timer: null,
+  create(){
+    const cur = this.get();
+    if(cur) return cur.id;                       // « Renvoyer l'e-mail » : même identifiant
+    const b = new Uint8Array(32); crypto.getRandomValues(b);
+    const id = Array.from(b, x => x.toString(16).padStart(2,'0')).join('');
+    localStorage.setItem(LS_PAIR, JSON.stringify({ id, t:Date.now() }));
+    return id;
+  },
+  get(){
+    try{
+      const p = JSON.parse(localStorage.getItem(LS_PAIR));
+      if(p && p.id && Date.now() - p.t < 15*60*1000) return p;
+    }catch(e){}
+    localStorage.removeItem(LS_PAIR);
+    return null;
+  },
+  async rpc(fn, body, token){
+    const r = await fetch(SUPABASE_URL + '/rest/v1/rpc/' + fn, {
+      method:'POST',
+      headers:{ apikey:SUPABASE_KEY, Authorization:'Bearer ' + (token || SUPABASE_KEY), 'Content-Type':'application/json' },
+      body: JSON.stringify(body)
+    });
+    const j = await r.json().catch(()=>null);
+    if(!r.ok) throw new Error((j && j.message) || ('HTTP ' + r.status));
+    return j;
+  },
+  /* côté app de l'écran d'accueil : la connexion est-elle arrivée ? */
+  async poll(){
+    const p = this.get();
+    if(!p || auth.session) return false;
+    let row;
+    try{ row = (await this.rpc('recuperer_session', { pair:p.id }) || [])[0]; }catch(e){ return false; }
+    if(!row || !row.refresh_token) return false;
+    this.stop(); localStorage.removeItem(LS_PAIR);
+    auth.save({ access_token:row.access_token, refresh_token:row.refresh_token, expires_at:row.expires_at });
+    /* l'adresse e-mail vient du serveur, pas du jeton déposé */
+    try{
+      const u = await fetch(SUPABASE_URL + '/auth/v1/user', { headers:{ apikey:SUPABASE_KEY, Authorization:'Bearer ' + await auth.token() } });
+      if(!u.ok) throw new Error('HTTP ' + u.status);
+      auth.save(Object.assign({}, auth.session, { user: await u.json() }));
+    }catch(e){ auth.save(null); toast('Connexion impossible, redemande un lien'); return false; }
+    localStorage.removeItem(LS_LOCALONLY);
+    closeModal(); toast('Connecté·e');
+    await cloud.start();
+    return true;
+  },
+  /* vérifie régulièrement tant que l'écran « Vérifie tes e-mails » est ouvert */
+  watch(){
+    this.stop();
+    this.timer = setInterval(()=>{
+      if(!$('#pairWait') || auth.session){ this.stop(); return; }
+      if(document.visibilityState === 'visible') this.poll();
+    }, 3000);
+  },
+  stop(){ clearInterval(this.timer); this.timer = null; },
+  /* côté Safari : dépose la connexion pour l'app, sans la garder ici */
+  async handOff(id){
+    history.replaceState(null, '', location.pathname + location.hash);   // retire ?pair= de l'adresse
+    let msg;
+    try{
+      const s = await auth.fromUrl(false);
+      if(!s) throw new Error('Lien incomplet');
+      await this.rpc('deposer_session', {
+        pair:id, jeton:s.access_token, jeton_refresh:s.refresh_token,
+        expire: Number(s.expires_at) || (Math.floor(Date.now()/1000) + (Number(s.expires_in) || 3600))
+      }, s.access_token);
+      /* surtout pas de déconnexion ici : elle couperait aussi la connexion transmise */
+      msg = `<h2>C’est tout bon&nbsp;!</h2>
+        <div class="muted">Retourne dans l’app <b>Mes Recettes</b> de ton écran d’accueil : tu y seras connecté·e automatiquement.<br><br>Tu peux fermer cette page.</div>`;
+    }catch(e){
+      msg = `<h2>Lien expiré</h2>
+        <div class="muted">Ce lien de connexion est invalide, expiré ou a déjà servi.<br><br>Retourne dans l’app <b>Mes Recettes</b> de ton écran d’accueil et demande un nouveau lien.</div>`;
+    }
+    paintAccount();
+    openModal(msg + `<div class="foot"><button class="btn ghost" data-act="closemodal">Fermer</button></div>`);
+  }
+};
+
 async function initCloud(){
   if(!CLOUD_OK) return;                         // pas de Supabase configuré : 100 % local
   $('#acctBtn').hidden = false;
   auth.load();
+  /* lien ouvert dans Safari alors qu'il a été demandé depuis l'app de l'écran d'accueil */
+  const pairId = new URLSearchParams(location.search).get('pair');
+  if(pairId){
+    if(auth.session) await cloud.start();         // Safari avait déjà sa propre connexion : on la garde
+    await pair.handOff(pairId);
+    return;
+  }
   let linkErr = '';
   try{
     if(await auth.fromUrl()){ localStorage.removeItem(LS_LOCALONLY); toast('Connecté·e'); }
   }catch(e){
     linkErr = 'Ce lien de connexion est invalide, expiré ou a déjà servi. Demande un nouveau lien ci-dessous.';
   }
+  if(!auth.session && await pair.poll()) return;   // connexion transmise pendant que l'app était fermée
   if(auth.session) await cloud.start();
   else{
     paintAccount();
@@ -754,6 +854,7 @@ async function initCloud(){
     if(!auth.session){                          // connecté entre-temps dans un autre onglet (lien de l'e-mail)
       auth.load();
       if(auth.session){ closeModal(); await cloud.start(); }
+      else await pair.poll();                   // ou via Safari, pour l'app de l'écran d'accueil
       return;
     }
     if(!cloud.on){ await cloud.start(); return; }
@@ -816,7 +917,10 @@ function openLogin(email = '', err = ''){
 function openCode(email){
   openModal(`
     <h2>Vérifie tes e-mails</h2>
-    <div class="muted" style="margin-bottom:6px">Un e-mail vient d’être envoyé à <b>${esc(email)}</b>. Ouvre-le <b>sur cet appareil</b> et clique sur le lien qu’il contient : l’app s’ouvrira et tu seras connecté·e. Pense à regarder dans les spams.</div>
+    <div class="muted" style="margin-bottom:6px">Un e-mail vient d’être envoyé à <b>${esc(email)}</b>. ${STANDALONE
+      ? 'Ouvre-le <b>sur cet appareil</b> et clique sur le lien : il s’ouvrira dans Safari. <b>Reviens ensuite ici</b>, la connexion se fera toute seule.'
+      : 'Ouvre-le <b>sur cet appareil</b> et clique sur le lien qu’il contient : l’app s’ouvrira et tu seras connecté·e.'} Pense à regarder dans les spams.</div>
+    ${STANDALONE ? '<div class="muted" id="pairWait" style="margin:10px 0 0">⏳ En attente du lien…</div>' : ''}
     <div class="err" id="rErr"></div>
     <div class="foot">
       <button type="button" class="btn ghost" data-act="relogin" data-email="${esc(email)}">Changer d’adresse</button>
@@ -831,6 +935,7 @@ function openCode(email){
       </form>
     </details>
   `);
+  if(STANDALONE) pair.watch();
   $('#rGo').addEventListener('click', async ()=>{
     $('#rGo').disabled = true; $('#rErr').textContent = '';
     try{ await auth.sendCode(email); toast('Nouvel e-mail envoyé'); }
