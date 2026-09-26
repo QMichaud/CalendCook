@@ -50,6 +50,36 @@ begin
 end;
 $$;
 
+-- 3 bis) Quitter un foyer : si plus personne n'en fait partie, ses données sont effacées
+create or replace function public.quitter_foyer(f text)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare
+  moi text := lower(auth.jwt() ->> 'email');
+begin
+  if moi is null then raise exception 'Connexion requise'; end if;
+  delete from public.foyer_membres where foyer_id = f and email = moi;
+  if not found then raise exception 'Tu ne fais pas partie de ce foyer'; end if;
+  if not exists (select 1 from public.foyer_membres where foyer_id = f) then
+    delete from public.recettes_app where id = f;
+  end if;
+end;
+$$;
+
+-- 3 ter) Supprimer un foyer pour tout le monde (membres + données)
+create or replace function public.supprimer_foyer(f text)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if auth.jwt() ->> 'email' is null then raise exception 'Connexion requise'; end if;
+  if not public.est_membre(f) then raise exception 'Tu ne fais pas partie de ce foyer'; end if;
+  delete from public.recettes_app  where id = f;
+  delete from public.foyer_membres where foyer_id = f;
+end;
+$$;
+
 -- 4) Sécurité des membres : on ne voit / gère que les membres de SES foyers
 alter table public.foyer_membres enable row level security;
 drop policy if exists "membres: voir"    on public.foyer_membres;
@@ -77,9 +107,13 @@ create policy "foyer: modifier" on public.recettes_app for update to authenticat
 revoke all on public.recettes_app  from anon;
 revoke all on public.foyer_membres from anon;
 revoke execute on function public.creer_foyer(text) from anon, public;
+revoke execute on function public.quitter_foyer(text)   from anon, public;
+revoke execute on function public.supprimer_foyer(text) from anon, public;
 grant select, insert, update on public.recettes_app  to authenticated;
 grant select, insert, delete on public.foyer_membres to authenticated;
 grant execute on function public.creer_foyer(text) to authenticated;
+grant execute on function public.quitter_foyer(text)   to authenticated;
+grant execute on function public.supprimer_foyer(text) to authenticated;
 grant execute on function public.est_membre(text)  to authenticated;
 
 -- 7) Recharge le cache de l'API pour que l'app voie tout de suite les fonctions
@@ -92,3 +126,11 @@ notify pgrst, 'reload schema';
 --   ('foyerRatMic', 'ton.adresse@exemple.fr'),
 --   ('foyerRatMic', 'adresse.de.l.autre.personne@exemple.fr')
 -- on conflict do nothing;
+
+-- 9) (Facultatif) Données de foyers qui ne sont plus rattachés à personne.
+--    Pour les voir :
+-- select id, updated_at from public.recettes_app
+--   where id not in (select foyer_id from public.foyer_membres);
+--    Pour les effacer (définitif) :
+-- delete from public.recettes_app
+--   where id not in (select foyer_id from public.foyer_membres);
