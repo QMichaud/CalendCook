@@ -310,6 +310,30 @@
   .acct svg{width:17px;height:17px;flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round}
   .acct span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .acct.off{color:#8E6A2E;background:#FBF0DD;border-color:#EEDDBF}
+  .acct .caret{width:13px;height:13px;stroke-width:2.4;margin-left:-2px}
+  .acct.nomenu .caret{display:none}
+  /* menu déroulant des foyers : une petite fiche épinglée sous le bouton */
+  .brand{position:relative}
+  .menu{
+    position:absolute;right:0;top:calc(100% + 8px);z-index:40;width:250px;max-width:calc(100vw - 32px);
+    background-color:var(--sheet);background-image:var(--grid);background-size:var(--grid-size);
+    border:1px solid var(--line);border-top:3px double rgba(201,83,76,.55);border-radius:var(--radius);
+    box-shadow:0 8px 24px rgba(39,50,74,.18);padding:6px;animation:fade .15s ease;
+  }
+  .menu[hidden]{display:none}
+  .menu-h{font-family:var(--hand);font-size:22px;font-weight:700;color:var(--accent-deep);padding:2px 8px 4px}
+  .menu-i{
+    display:flex;align-items:center;gap:8px;width:100%;border:0;background:transparent;text-align:left;
+    padding:9px 8px;border-radius:5px;font-size:14.5px;font-weight:700;color:var(--ink);cursor:pointer;
+  }
+  .menu-i:active,.menu-i:hover{background:var(--accent-soft)}
+  .menu-i.on .menu-t{background:linear-gradient(transparent 58%, var(--hl) 58%, var(--hl) 92%, transparent 92%);padding:0 3px}
+  .menu-i.accent{color:var(--accent)}
+  .menu-ck{width:18px;flex:none;text-align:center;color:var(--accent);font-weight:800}
+  .menu-t{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .menu-sep{height:1px;background:var(--line);margin:5px 4px}
+  .menu-empty{padding:6px 8px;font-size:13px;color:var(--ink-soft)}
+  .menu-foot{padding:6px 8px 2px;font-size:11.5px;color:var(--ink-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   input.code{letter-spacing:6px;text-align:center;font-size:22px;font-weight:800}
   .err{color:var(--red);font-size:13px;margin-top:8px;min-height:1em;font-weight:600}
   details.help summary{cursor:pointer;font-size:13.5px;font-weight:700;color:var(--accent);padding:4px 0}
@@ -329,7 +353,9 @@
     <button class="acct" id="acctBtn" hidden aria-label="Mon compte et mon foyer">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>
       <span id="acctLab">Connexion</span>
+      <svg class="caret" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
     </button>
+    <div class="menu" id="acctMenu" hidden></div>
   </div>
 </header>
 
@@ -749,6 +775,7 @@ function paintAccount(){
   if(!CLOUD_OK) return;
   $('#acctBtn').classList.toggle('off', !cloud.on);
   $('#acctLab').textContent = !auth.session ? 'Se connecter' : (cloud.foyer || 'Mon foyer');
+  $('#acctBtn').classList.toggle('nomenu', !auth.session);
 }
 function paintSync(){ paintAccount(); renderWeek(); }
 
@@ -827,17 +854,132 @@ function openCode(email){
   });
 }
 
-/* ---------- « Mon foyer » : membres, invitations, déconnexion ---------- */
+/* ---------- menu du bouton en haut à droite : foyers, création, déconnexion ---------- */
+function closeMenu(){ const m = $('#acctMenu'); if(m) m.hidden = true; }
+function toggleMenu(){
+  const m = $('#acctMenu');
+  if(!m.hidden){ closeMenu(); return; }
+  const list = cloud.foyers.length
+    ? cloud.foyers.map(f=>`<button class="menu-i${f===cloud.foyer?' on':''}" data-act="switchfoyer" data-foyer="${esc(f)}">
+        <span class="menu-ck">${f===cloud.foyer?'✓':''}</span><span class="menu-t">${esc(f)}</span></button>`).join('')
+    : `<div class="menu-empty">Aucun foyer pour l’instant</div>`;
+  m.innerHTML = `
+    <div class="menu-h">Mes foyers</div>
+    ${list}
+    <button class="menu-i accent" data-act="newfoyer"><span class="menu-ck">＋</span><span class="menu-t">Créer un foyer</span></button>
+    <div class="menu-sep"></div>
+    ${cloud.foyer ? `<button class="menu-i" data-act="foyer"><span class="menu-ck">⚙</span><span class="menu-t">Membres &amp; réglages</span></button>` : ''}
+    <button class="menu-i" data-act="logout"><span class="menu-ck">↩</span><span class="menu-t">Se déconnecter</span></button>
+    <div class="menu-foot">${esc(auth.email)}</div>`;
+  m.hidden = false;
+}
+document.addEventListener('click', e=>{                   // clic en dehors du menu : on le ferme
+  if(!e.target.closest('#acctMenu') && !e.target.closest('#acctBtn')) closeMenu();
+});
+
+/* message lisible pour une erreur sur les foyers */
+function foyerErrMsg(e){
+  if(/déjà pris/.test(e.message)) return 'Ce nom de foyer est déjà pris.';
+  if(/schema cache|does not exist/i.test(e.message)) return 'La base Supabase n’est pas à jour : exécute le script supabase_setup.sql dans Supabase (SQL Editor).';
+  return 'Action impossible : ' + e.message;
+}
+const EMPTY = () => ({ recipes:[], plan:{}, shopping:[], eaters:[] });
+
+/* champ « nom du foyer » + bouton Créer, dans l'élément donné */
+function createFoyerForm(where){
+  where.insertAdjacentHTML('beforeend', `
+    <label class="f">Nom du nouveau foyer</label>
+    <div class="row">
+      <input type="text" id="newFoyer" placeholder="Ex. famille-dupont" style="flex:1">
+      <button class="btn sm" id="newFoyerOk" style="flex:none">Créer</button>
+    </div>
+    <div class="err" id="fErr"></div>`);
+  const go = async ()=>{
+    const nom = $('#newFoyer').value.trim();
+    if(nom.length < 3){ $('#fErr').textContent = 'Choisis un nom d’au moins 3 caractères.'; return; }
+    $('#newFoyerOk').disabled = true;
+    try{ await createFoyer(nom); }
+    catch(e){ $('#fErr').textContent = foyerErrMsg(e); $('#newFoyerOk').disabled = false; }
+  };
+  $('#newFoyerOk').addEventListener('click', go);
+  $('#newFoyer').addEventListener('keydown', e=>{ if(e.key === 'Enter'){ e.preventDefault(); go(); }});
+  $('#newFoyer').focus();
+}
+async function createFoyer(nom){
+  const from = cloud.foyer;
+  if(from && cloud.pending && !(await cloud.flush())) throw new Error('hors ligne, réessaie une fois connecté·e');
+  await db('rpc/creer_foyer', { method:'POST', body:JSON.stringify({ nom }) });
+  const copy = confirm(from
+    ? 'Copier les recettes de « ' + from + ' » dans « ' + nom + ' » ?\n(Annuler = foyer vide)'
+    : 'Copier dans « ' + nom + ' » les recettes déjà présentes sur cet appareil ?\n(Annuler = foyer vide)');
+  /* depuis un autre foyer, on ne reprend que les recettes (pas son calendrier ni ses courses) */
+  if(!copy) state = EMPTY();
+  else if(from) state = Object.assign(EMPTY(), { recipes:state.recipes, eaters:state.eaters });
+  store.saveLocal(); render();
+  cloud.on = false; cloud.pending = false;
+  localStorage.setItem(LS_FOYER, nom);
+  await cloud.start();                                    // foyer vide en ligne : y publie l'état ci-dessus
+  closeModal(); toast('Foyer « ' + nom + ' » créé');
+}
+function openCreateFoyer(){
+  openModal(`
+    <h2>Nouveau foyer</h2>
+    <div class="muted">Un foyer regroupe des recettes, un calendrier et une liste de courses, partagés avec les personnes que tu y invites. Tu pourras passer d’un foyer à l’autre depuis le bouton en haut à droite.</div>
+    <div id="cfBody" style="margin-top:6px"></div>
+    <div class="foot"><button class="btn ghost" data-act="closemodal">Annuler</button></div>
+  `);
+  createFoyerForm($('#cfBody'));
+}
+async function switchFoyer(f){
+  if(!f || f === cloud.foyer) return;
+  if(cloud.pending && !(await cloud.flush())){ toast('Hors ligne : impossible de changer de foyer pour l’instant'); return; }
+  localStorage.setItem(LS_FOYER, f);
+  await cloud.start();
+  if(cloud.foyer === f){ toast('Foyer « ' + f + ' »'); scrollToToday(); }
+}
+/* après avoir quitté / supprimé le foyer affiché : on passe à un autre foyer (ou à aucun) */
+async function afterFoyerGone(){
+  cloud.on = false; cloud.pending = false; cloud.foyer = '';
+  localStorage.removeItem(LS_FOYER);
+  state = EMPTY(); store.saveLocal(); render();
+  closeModal();
+  await cloud.start();
+}
+async function leaveFoyer(nbMembres){
+  const f = cloud.foyer;
+  const last = nbMembres <= 1;
+  if(!confirm(last
+    ? 'Tu es le dernier membre de « ' + f + ' ».\nEn le quittant, le foyer et toutes ses données (recettes, calendrier, courses) seront définitivement supprimés.\n\nQuitter quand même ?'
+    : 'Quitter « ' + f + ' » ?\nTu n’auras plus accès à ses recettes, sauf si un membre t’invite à nouveau.')) return;
+  try{
+    await db('rpc/quitter_foyer', { method:'POST', body:JSON.stringify({ f }) });
+    await afterFoyerGone();
+    toast(last ? 'Foyer « ' + f + ' » supprimé' : 'Tu as quitté « ' + f + ' »');
+  }catch(e){ toast(foyerErrMsg(e)); }
+}
+async function deleteFoyer(nbMembres){
+  const f = cloud.foyer;
+  const typed = prompt('Supprimer définitivement « ' + f + ' » pour ' + (nbMembres > 1 ? 'ses ' + nbMembres + ' membres' : 'toi') + ' ?\n'
+    + 'Ses recettes, son calendrier et sa liste de courses seront effacés, sans retour possible.\n\n'
+    + 'Pour confirmer, tape le nom du foyer :');
+  if(typed === null) return;
+  if(typed.trim() !== f){ toast('Nom incorrect : rien n’a été supprimé'); return; }
+  try{
+    await db('rpc/supprimer_foyer', { method:'POST', body:JSON.stringify({ f }) });
+    await afterFoyerGone();
+    toast('Foyer « ' + f + ' » supprimé');
+  }catch(e){ toast(foyerErrMsg(e)); }
+}
+
+/* ---------- « Membres & réglages » du foyer affiché ---------- */
 async function openFoyer(){
   if(!auth.session){ openLogin(); return; }
+  closeMenu();
   openModal(`
-    <h2>Mon foyer</h2>
+    <h2>${cloud.foyer ? esc(cloud.foyer) : 'Mon foyer'}</h2>
     <div class="muted">Connecté·e : <b>${esc(auth.email)}</b></div>
     <div id="foyerBody" style="margin-top:6px"><div class="muted" style="margin-top:12px">Chargement…</div></div>
-    <div class="foot">
-      <button class="btn ghost" data-act="closemodal">Fermer</button>
-      <button class="btn danger" data-act="logout">Se déconnecter</button>
-    </div>
+    <div class="foot"><button class="btn ghost" data-act="closemodal">Fermer</button></div>
   `);
   const body = $('#foyerBody');
 
@@ -845,41 +987,16 @@ async function openFoyer(){
     body.innerHTML = `
       <div class="empty" style="padding:16px;margin:12px 0">Ton adresse n’est rattachée à aucun foyer.<br>
         <span class="muted">Demande à un membre de t’inviter avec cette adresse, ou crée un nouveau foyer.</span></div>
-      <button class="btn ghost block" data-act="refoyer">J’ai été invité·e — réessayer</button>
-      <label class="f">Créer un nouveau foyer</label>
-      <div class="row">
-        <input type="text" id="newFoyer" placeholder="Ex. famille-dupont" style="flex:1">
-        <button class="btn sm" id="newFoyerOk" style="flex:none">Créer</button>
-      </div>
-      <div class="err" id="fErr"></div>`;
-    $('#newFoyerOk').addEventListener('click', async ()=>{
-      const nom = $('#newFoyer').value.trim();
-      if(nom.length < 3){ $('#fErr').textContent = 'Choisis un nom d’au moins 3 caractères.'; return; }
-      try{
-        await db('rpc/creer_foyer', { method:'POST', body:JSON.stringify({ nom }) });
-        if(!confirm('Copier dans ce nouveau foyer les recettes déjà présentes sur cet appareil ?\n(Annuler = foyer vide)')){
-          state = { recipes:[], plan:{}, shopping:[], eaters:[] }; store.saveLocal(); render();
-        }
-        localStorage.setItem(LS_FOYER, nom);
-        await cloud.start();
-        if(cloud.foyer) openFoyer();
-        toast('Foyer créé');
-      }catch(e){
-        $('#fErr').textContent = /déjà pris/.test(e.message) ? 'Ce nom de foyer est déjà pris.'
-          : /schema cache|does not exist/i.test(e.message) ? 'La base Supabase n’est pas encore configurée : exécute le script supabase_setup.sql dans Supabase (SQL Editor).'
-          : 'Création impossible : ' + e.message;
-      }
-    });
+      <button class="btn ghost block" data-act="refoyer">J’ai été invité·e — réessayer</button>`;
+    createFoyerForm(body);
     return;
   }
 
   try{
     const rows = await db('foyer_membres?select=email&order=email&foyer_id=eq.' + encodeURIComponent(cloud.foyer));
+    const nb = (rows || []).length;
     body.innerHTML = `
-      <label class="f">Foyer</label>
-      ${cloud.foyers.length > 1
-        ? `<select id="foyerSel">${cloud.foyers.map(f=>`<option value="${esc(f)}"${f===cloud.foyer?' selected':''}>${esc(f)}</option>`).join('')}</select>`
-        : `<div style="font-weight:650">${esc(cloud.foyer)} <span class="pill ${cloud.on?'cloud':'local'}" style="margin-left:6px">${cloud.on?'synchronisé':'hors ligne'}</span></div>`}
+      <div><span class="pill ${cloud.on?'cloud':'local'}">${cloud.on?'synchronisé':'hors ligne'}</span></div>
       <label class="f">Membres</label>
       <div class="card" style="padding:4px 12px;box-shadow:none;margin:0">
         ${(rows||[]).map(r=>`
@@ -894,13 +1011,15 @@ async function openFoyer(){
         <button class="btn sm" id="invOk" style="flex:none">Inviter</button>
       </div>
       <div class="err" id="fErr"></div>
-      <div class="muted">Aucun e-mail d’invitation n’est envoyé : préviens la personne qu’elle peut maintenant se connecter à l’app avec cette adresse.</div>`;
-    const sel = $('#foyerSel');
-    if(sel) sel.addEventListener('change', async ()=>{
-      if(cloud.pending) await cloud.flush();
-      localStorage.setItem(LS_FOYER, sel.value);
-      await cloud.start(); openFoyer();
-    });
+      <div class="muted">Aucun e-mail d’invitation n’est envoyé : préviens la personne qu’elle peut maintenant se connecter à l’app avec cette adresse.</div>
+      <label class="f">Quitter ou supprimer</label>
+      <div class="row">
+        <button class="btn line sm" style="flex:1" id="leaveOk">Quitter ce foyer</button>
+        <button class="btn danger sm" style="flex:1" id="delOk">Supprimer ce foyer</button>
+      </div>
+      <div class="muted" style="margin-top:6px">${nb > 1
+        ? 'Quitter : le foyer continue pour les autres membres. Supprimer : il est effacé pour tout le monde.'
+        : 'Tu es le seul membre : quitter ou supprimer efface le foyer et ses données.'}</div>`;
     const invite = async ()=>{
       const mail = $('#invEmail').value.trim().toLowerCase();
       if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)){ $('#fErr').textContent = 'Adresse e-mail invalide.'; return; }
@@ -913,6 +1032,8 @@ async function openFoyer(){
     };
     $('#invOk').addEventListener('click', invite);
     $('#invEmail').addEventListener('keydown', e=>{ if(e.key === 'Enter'){ e.preventDefault(); invite(); }});
+    $('#leaveOk').addEventListener('click', ()=> leaveFoyer(nb));
+    $('#delOk').addEventListener('click', ()=> deleteFoyer(nb));
   }catch(e){
     body.innerHTML = `<div class="err" style="margin-top:12px">Impossible de charger le foyer (${esc(e.message)}).</div>`;
   }
@@ -1455,7 +1576,10 @@ document.addEventListener('click', e=>{
     case 'eater': openEaterForm(); break;
     case 'localonly': localStorage.setItem(LS_LOCALONLY,'1'); closeModal(); toast('Données gardées sur cet appareil'); break;
     case 'relogin': openLogin(t.dataset.email); break;
-    case 'logout': doLogout(); break;
+    case 'logout': closeMenu(); doLogout(); break;
+    case 'switchfoyer': closeMenu(); switchFoyer(t.dataset.foyer); break;
+    case 'newfoyer': closeMenu(); openCreateFoyer(); break;
+    case 'foyer': openFoyer(); break;
     case 'refoyer': cloud.start().then(()=>{ if(cloud.foyer) openFoyer(); }); break;
     case 'delmembre': {
       const mail = t.dataset.email;
@@ -1511,7 +1635,7 @@ $('#nextW2').addEventListener('click', ()=>{
 });
 $('#todayBtn').addEventListener('click', ()=>{ ANCHOR = new Date(); ANCHOR.setHours(0,0,0,0); render(); scrollToToday(true); });
 $('#eatersBtn').addEventListener('click', openEaterForm);
-$('#acctBtn').addEventListener('click', ()=> auth.session ? openFoyer() : openLogin());
+$('#acctBtn').addEventListener('click', ()=> auth.session ? toggleMenu() : openLogin());
 
 $('#pickWeekBtn').addEventListener('click', ()=>{
   const cur = isoWeek(ANCHOR), now = isoWeek(new Date()).year;
