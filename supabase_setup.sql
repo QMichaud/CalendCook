@@ -4,6 +4,13 @@
 --  (le script peut être relancé sans risque)
 -- ============================================================
 
+-- 0) Les données de chaque foyer (recettes, calendrier, courses)
+create table if not exists public.recettes_app (
+  id         text        primary key,
+  data       jsonb       not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
 -- 1) Qui appartient à quel foyer (un foyer = plusieurs adresses e-mail)
 create table if not exists public.foyer_membres (
   foyer_id  text        not null,
@@ -75,8 +82,13 @@ grant select, insert, delete on public.foyer_membres to authenticated;
 grant execute on function public.creer_foyer(text) to authenticated;
 grant execute on function public.est_membre(text)  to authenticated;
 
--- 7) ⚠️ À ADAPTER : rattache ton foyer actuel à vos adresses e-mail (en minuscules)
-insert into public.foyer_membres (foyer_id, email) values
-  ('foyerRatMic', 'ton.adresse@exemple.fr'),
-  ('foyerRatMic', 'adresse.de.l.autre.personne@exemple.fr')
-on conflict do nothing;
+-- 7) Recharge le cache de l'API pour que l'app voie tout de suite les fonctions
+notify pgrst, 'reload schema';
+
+-- 8) (Facultatif) Les foyers se créent depuis l'app (« Mon foyer » → Créer).
+--    Pour rattacher à la main des adresses à un foyer existant, retire les
+--    « -- » des 4 lignes ci-dessous et mets vos adresses (en minuscules) :
+-- insert into public.foyer_membres (foyer_id, email) values
+--   ('foyerRatMic', 'ton.adresse@exemple.fr'),
+--   ('foyerRatMic', 'adresse.de.l.autre.personne@exemple.fr')
+-- on conflict do nothing;

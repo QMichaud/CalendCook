@@ -810,7 +810,9 @@ async function openFoyer(){
         if(cloud.foyer) openFoyer();
         toast('Foyer créé');
       }catch(e){
-        $('#fErr').textContent = /déjà pris/.test(e.message) ? 'Ce nom de foyer est déjà pris.' : 'Création impossible : ' + e.message;
+        $('#fErr').textContent = /déjà pris/.test(e.message) ? 'Ce nom de foyer est déjà pris.'
+          : /schema cache|does not exist/i.test(e.message) ? 'La base Supabase n’est pas encore configurée : exécute le script supabase_setup.sql dans Supabase (SQL Editor).'
+          : 'Création impossible : ' + e.message;
       }
     });
     return;
