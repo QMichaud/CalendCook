@@ -134,6 +134,14 @@
   .row.wrap{flex-wrap:wrap}
 
   /* ---------- Semaine ---------- */
+  /* bloc des semaines : reste accroché sous l'en-tête, caché quand on descend,
+     il réapparaît dès qu'on remonte */
+  #weekBar{
+    position:sticky;top:var(--hdr, 70px);z-index:15;
+    transition:transform .22s ease, opacity .22s ease;
+  }
+  #weekBar.stuck{box-shadow:0 6px 18px rgba(39,50,74,.16)}
+  #weekBar.away{transform:translateY(calc(-100% - var(--hdr, 70px)));opacity:0;pointer-events:none}
   .weeknav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px}
   .weeknav .lab{text-align:center;flex:1;min-width:0}
   .weeknav .lab b{display:block;font-family:var(--hand);font-size:30px;line-height:1;font-weight:700;color:var(--accent-deep)}
@@ -223,6 +231,9 @@
   }
   input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
   .grid2{display:grid;grid-template-columns:1fr 96px;gap:8px}
+  .grid2b{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .grid2b label.f:first-child{margin-top:12px}
+  h2.sec .sec-sub{font-size:19px;color:var(--ink-soft);font-weight:600}
   .ingline{display:grid;grid-template-columns:1fr 60px 82px 32px;gap:6px;margin-bottom:7px;align-items:center}
   .ingline input[type=number]{padding:10px 8px;text-align:center}
   .ingline select{padding:10px 4px;text-align:center}
@@ -364,7 +375,7 @@
 
   <!-- ================= CALENDRIER ================= -->
   <section class="view on" id="v-cal">
-    <div class="card">
+    <div class="card" id="weekBar">
       <div class="weeknav">
         <button class="iconbtn" id="prevW" aria-label="Semaine précédente">
           <svg viewBox="0 0 24 24"><polyline points="15 5 8 12 15 19"/></svg>
@@ -1259,10 +1270,36 @@ function renderWeek(){
 let userScrolled = false;                      // la personne a fait défiler elle-même : on ne bouge plus
 function scrollToToday(smooth){
   const el = $('#v-cal.on .day.today');
+  if(el) weekBar.hideFor(smooth ? 900 : 150);
   if(el) el.scrollIntoView({ block:'start', behavior: smooth ? 'smooth' : 'auto' });
   else if(smooth) window.scrollTo({ top:0, behavior:'smooth' });
 }
 ['touchmove','wheel','keydown'].forEach(ev => addEventListener(ev, ()=>{ userScrolled = true; }, { once:true, passive:true }));
+
+/* bloc des semaines : visible en haut de page, caché en descendant, rappelé en remontant */
+const weekBar = {
+  lastY: 0, travel: 0, quietUntil: 0, hdr: 70,
+  measure(){ this.hdr = $('header.app').offsetHeight; document.documentElement.style.setProperty('--hdr', this.hdr + 'px'); },
+  onScroll(){
+    const bar = $('#weekBar');
+    const y = Math.max(0, window.scrollY);            // ignore le rebond élastique d'iOS
+    const dy = y - this.lastY; this.lastY = y;
+    /* le bloc « colle » sous l'en-tête dès que sa place normale passe dessous */
+    const stuck = y > $('#v-cal').offsetTop - this.hdr + 1;
+    bar.classList.toggle('stuck', stuck);
+    if(!stuck){ bar.classList.remove('away'); this.travel = 0; return; }
+    if(Date.now() < this.quietUntil){ bar.classList.add('away'); return; }
+    /* on attend un petit déplacement dans le même sens pour éviter le clignotement */
+    this.travel = (Math.sign(dy) === Math.sign(this.travel)) ? this.travel + dy : dy;
+    if(this.travel > 12) bar.classList.add('away');
+    else if(this.travel < -12) bar.classList.remove('away');
+  },
+  /* défilement automatique (ex. vers le jour actuel) : le bloc reste caché */
+  hideFor(ms){ this.quietUntil = Date.now() + ms; $('#weekBar').classList.add('away'); }
+};
+weekBar.measure();
+addEventListener('resize', ()=> weekBar.measure());
+addEventListener('scroll', ()=> weekBar.onScroll(), { passive:true });
 
 /* ============================================================
    RENDU — RECETTES
@@ -1290,6 +1327,7 @@ function renderRecipes(){
       <h3>${esc(r.name)}</h3>
       <div class="meta">
         <span>⏱ ${r.duration} min</span>
+        ${r.servings ? `<span>👥 ${r.servings} pers.</span>` : ''}
         <span>${ing} ingrédient${ing>1?'s':''}</span>
       </div>
       ${tags?`<div class="tags" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:7px">${tags}</div>`:''}
@@ -1435,9 +1473,10 @@ function openRecipe(id){
     <h2>${esc(r.name)}</h2>
     <div class="row" style="gap:8px;margin-bottom:12px">
       <span class="pill">⏱ ${r.duration} min</span>
+      ${r.servings ? `<span class="pill">👥 ${r.servings} personne${r.servings>1?'s':''}</span>` : ''}
       ${(r.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}
     </div>
-    <h2 class="sec">Ingrédients</h2>
+    <h2 class="sec">Ingrédients${r.servings ? ' <small class="sec-sub">pour ' + r.servings + '</small>' : ''}</h2>
     ${ing || '<div class="muted">Aucun ingrédient renseigné.</div>'}
     <div class="foot">
       <button class="btn ghost" style="flex:1" data-act="editrec" data-id="${r.id}">Modifier</button>
@@ -1447,9 +1486,28 @@ function openRecipe(id){
   `);
 }
 
+/* unité la plus utilisée pour chaque ingrédient déjà connu : un seul passage sur
+   les recettes à l'ouverture du formulaire (quelques millisecondes même avec
+   des centaines de recettes), puis une simple lecture de table à chaque saisie */
+const ingKey = n => String(n || '').trim().toLowerCase().replace(/œ/g,'oe').replace(/æ/g,'ae')
+  .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+function ingredientStats(){
+  const counts = new Map(), names = new Map();
+  for(const r of state.recipes) for(const i of (r.ingredients || [])){
+    const k = ingKey(i.name); if(!k) continue;
+    if(!names.has(k)) names.set(k, i.name.trim());
+    const c = counts.get(k) || {}; const u = i.unit || '';
+    c[u] = (c[u] || 0) + 1; counts.set(k, c);
+  }
+  const unit = new Map();
+  counts.forEach((c, k) => unit.set(k, Object.keys(c).reduce((a, b) => c[b] > c[a] ? b : a)));
+  return { unit, names:Array.from(names.values()).sort((a,b)=>a.localeCompare(b,'fr')) };
+}
+let ingStats = { unit:new Map(), names:[] };
 function ingredientRow(name='', qty='', unit='g'){
-  return `<div class="ingline">
-    <input type="text" class="i-name" placeholder="Ingrédient" value="${esc(name)}">
+  /* une ligne déjà remplie garde son unité ; une ligne vide suit l'unité habituelle */
+  return `<div class="ingline"${name ? ' data-touched="1"' : ''}>
+    <input type="text" class="i-name" placeholder="Ingrédient" list="ingSuggest" value="${esc(name)}">
     <input type="number" class="i-qty" min="0" step="any" inputmode="decimal" placeholder="Qté" value="${esc(qty ?? '')}">
     <select class="i-unit">${UNITS.map(u=>`<option value="${u.k}"${u.k===unit?' selected':''}>${esc(u.l)}</option>`).join('')}</select>
     <button class="x" data-act="deling" aria-label="Retirer la ligne">×</button>
@@ -1465,10 +1523,20 @@ function openRecipeForm(id){
       <label class="f">Nom de la recette</label>
       <input type="text" id="rName" required value="${r?esc(r.name):''}" placeholder="Ex. Risotto aux champignons">
 
-      <label class="f">Durée (minutes)</label>
-      <input type="number" id="rDur" min="1" step="1" required value="${r?r.duration:''}" placeholder="30">
+      <div class="grid2b">
+        <div>
+          <label class="f">Durée (minutes)</label>
+          <input type="number" id="rDur" min="1" step="1" required value="${r?r.duration:''}" placeholder="30">
+        </div>
+        <div>
+          <label class="f">Pour (personnes)</label>
+          <input type="number" id="rServ" min="1" step="1" inputmode="numeric" value="${r&&r.servings?r.servings:''}" placeholder="4">
+        </div>
+      </div>
 
       <label class="f">Ingrédients</label>
+      <div class="muted" id="ingFor" style="margin:-2px 0 6px">${r&&r.servings ? 'Quantités pour ' + r.servings + ' personne' + (r.servings>1?'s':'') : 'Quantités pour le nombre de personnes indiqué ci-dessus'}</div>
+      <datalist id="ingSuggest"></datalist>
       <div id="ingWrap">
         ${(r&&r.ingredients&&r.ingredients.length ? r.ingredients : [{name:'',qty:'',unit:'g'}]).map(i=>ingredientRow(i.name,i.qty,i.unit ?? 'g')).join('')}
       </div>
@@ -1485,11 +1553,31 @@ function openRecipeForm(id){
       </div>
     </form>
   `);
+  ingStats = ingredientStats();
+  $('#ingSuggest').innerHTML = ingStats.names.map(n=>`<option value="${esc(n)}">`).join('');
+  /* unité habituelle proposée dès qu'on saisit un ingrédient connu,
+     tant qu'on n'a pas choisi soi-même l'unité de la ligne */
+  const wrap = $('#ingWrap');
+  wrap.addEventListener('input', e=>{
+    if(!e.target.classList.contains('i-name')) return;
+    const line = e.target.closest('.ingline');
+    if(line.dataset.touched) return;
+    const u = ingStats.unit.get(ingKey(e.target.value));
+    if(u !== undefined) line.querySelector('.i-unit').value = u;
+  });
+  wrap.addEventListener('change', e=>{
+    if(e.target.classList.contains('i-unit')) e.target.closest('.ingline').dataset.touched = '1';
+  });
+  $('#rServ').addEventListener('input', ()=>{
+    const n = parseInt($('#rServ').value, 10);
+    $('#ingFor').textContent = n > 0 ? 'Quantités pour ' + n + ' personne' + (n>1?'s':'') : 'Quantités pour le nombre de personnes indiqué ci-dessus';
+  });
   const form = $('#recForm');
   form.addEventListener('submit', ev=>{
     ev.preventDefault();
     const name = $('#rName').value.trim();
     const duration = parseInt($('#rDur').value,10);
+    const servings = parseInt($('#rServ').value,10) > 0 ? parseInt($('#rServ').value,10) : null;
     if(!name){ toast('Le nom est obligatoire'); return; }
     if(!(duration > 0)){ toast('La durée doit être un nombre entier positif'); return; }
     const ingredients = Array.from($$('#ingWrap .ingline')).map(line=>{
@@ -1502,9 +1590,9 @@ function openRecipeForm(id){
     const uniqTags = Array.from(new Set(tags));
 
     if(r){
-      Object.assign(r, { name, duration, ingredients, tags:uniqTags });
+      Object.assign(r, { name, duration, servings, ingredients, tags:uniqTags });
     } else {
-      state.recipes.push({ id:uid(), name, duration, ingredients, tags:uniqTags });
+      state.recipes.push({ id:uid(), name, duration, servings, ingredients, tags:uniqTags });
     }
     store.save(); render(); closeModal();
     toast(r?'Recette mise à jour':'Recette ajoutée');
@@ -1810,7 +1898,7 @@ migrer();
 render();
 scrollToToday();
 /* les polices et les données du foyer peuvent décaler la page : on se recale tant que personne n'a défilé */
-const recaler = () => { if(!userScrolled) scrollToToday(); };
+const recaler = () => { weekBar.measure(); if(!userScrolled) scrollToToday(); };
 if(document.fonts) document.fonts.ready.then(recaler);
 initCloud().then(recaler);
 </script>
