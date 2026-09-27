@@ -784,13 +784,93 @@ async function db(path, opts = {}){
 }
 
 /* ---------- données partagées du foyer ---------- */
+/* ============================================================
+   FUSION DES MODIFICATIONS (plusieurs membres en même temps)
+   ------------------------------------------------------------
+   Fusion « à trois voies » : on compare la dernière version commune
+   avec le serveur (base), la version de cet appareil (local) et
+   celle du serveur (remote). Ce que chacun a ajouté, modifié ou
+   supprimé depuis la base est conservé ; en cas de modification du
+   même champ des deux côtés, cet appareil l'emporte.
+   ============================================================ */
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const clone = x => x === undefined ? undefined : JSON.parse(JSON.stringify(x));
+/* valeur simple : on garde le changement, s'il y en a un */
+function pick3(b, l, r){ return same(l, b) ? r : l; }
+/* objet : champ par champ */
+function mergeObj3(b, l, r){
+  b = b || {}; l = l || {}; r = r || {};
+  const out = {};
+  new Set([...Object.keys(r), ...Object.keys(l)]).forEach(k => {
+    const inL = k in l, inR = k in r, inB = k in b;
+    if(inL && inR) out[k] = pick3(b[k], l[k], r[k]);
+    else if(inL){ if(!inB || !same(l[k], b[k])) out[k] = l[k]; }          // ajouté ici (ou modifié alors que supprimé là-bas)
+    else if(inR){ if(!inB || !same(r[k], b[k])) out[k] = r[k]; }          // ajouté là-bas
+  });
+  return out;
+}
+/* liste d'éléments identifiés par .id (recettes, courses, plats d'un créneau) */
+function mergeList3(b, l, r){
+  b = b || []; l = l || []; r = r || [];
+  const byId = a => new Map(a.filter(x => x && x.id).map(x => [x.id, x]));
+  const B = byId(b), L = byId(l), R = byId(r);
+  const out = [];
+  const take = id => {
+    const x = L.get(id), y = R.get(id), z = B.get(id);
+    if(x && y) return same(x, y) ? y : mergeObj3(z, x, y);
+    if(x) return (!z || !same(x, z)) ? x : null;       // supprimé là-bas : on suit, sauf si modifié ici
+    if(y) return (!z || !same(y, z)) ? y : null;       // supprimé ici : on suit, sauf si modifié là-bas
+    return null;
+  };
+  const seen = new Set();
+  r.forEach(y => { if(y && y.id && !seen.has(y.id)){ seen.add(y.id); const v = take(y.id); if(v) out.push(v); } });
+  l.forEach(x => { if(x && x.id && !seen.has(x.id)){ seen.add(x.id); const v = take(x.id); if(v) out.push(v); } });
+  return out;
+}
+/* liste de valeurs simples (noms « pour qui », questions déjà posées…) */
+function mergeSet3(b, l, r){
+  b = b || []; l = l || []; r = r || [];
+  const added = l.filter(x => !b.includes(x)), removed = b.filter(x => !l.includes(x));
+  return Array.from(new Set([...r, ...added])).filter(x => !removed.includes(x));
+}
+function mergeState(base, local, remote){
+  base = base || {};
+  const out = mergeObj3(base, local, remote);                // autres champs éventuels
+  out.recipes  = mergeList3(base.recipes,  local.recipes,  remote.recipes);
+  out.shopping = mergeList3(base.shopping, local.shopping, remote.shopping);
+  out.eaters   = mergeSet3(base.eaters,    local.eaters,    remote.eaters);
+  out.mealAsked = mergeSet3(base.mealAsked, local.mealAsked, remote.mealAsked);
+  const md = {}, bd = base.mealDefaults || {}, ld = local.mealDefaults || {}, rd = remote.mealDefaults || {};
+  new Set([...Object.keys(bd), ...Object.keys(ld), ...Object.keys(rd)]).forEach(k => {
+    const v = mergeSet3(bd[k], ld[k], rd[k]); if(v.length) md[k] = v;
+  });
+  out.mealDefaults = md;
+  /* calendrier : jour par jour, créneau par créneau */
+  const plan = {}, bp = base.plan || {}, lp = local.plan || {}, rp = remote.plan || {};
+  new Set([...Object.keys(rp), ...Object.keys(lp)]).forEach(k => {
+    const bd = bp[k] || {}, ld = lp[k] || {}, rd = rp[k] || {};
+    const day = mergeObj3(bd, ld, rd);
+    SLOTS.forEach(s => day[s.k] = mergeList3(bd[s.k], ld[s.k], rd[s.k]));
+    const show = mergeObj3(bd.show, ld.show, rd.show);
+    if(Object.keys(show).length) day.show = show; else delete day.show;
+    plan[k] = day;
+  });
+  out.plan = plan;
+  return out;
+}
+const LS_BASE = 'mesrecettes.base.';            // + nom du foyer : dernière version commune avec le serveur
+
+/* ---------- données partagées du foyer ---------- */
 const cloud = {
-  on:false, foyer:'', foyers:[], timer:null, pending:false, warned:false,
+  on:false, foyer:'', foyers:[], timer:null, pending:false, warned:false, sending:null,
+  getBase(){ try{ return JSON.parse(localStorage.getItem(LS_BASE + this.foyer)); }catch(e){ return null; } },
+  setBase(d){ try{ localStorage.setItem(LS_BASE + this.foyer, JSON.stringify(d)); }catch(e){} },
   async pull(){
     const rows = await db('recettes_app?select=data&id=eq.' + encodeURIComponent(this.foyer));
     if(rows && rows.length && rows[0].data){
       state = Object.assign({ recipes:[], plan:{}, shopping:[], eaters:[] }, rows[0].data);
       migrer();
+      this.setBase(state);
       store.saveLocal();
       render();
     } else if(!(await this.flush())){       // foyer tout neuf : on y publie les données de cet appareil
@@ -802,17 +882,48 @@ const cloud = {
     this.pending = true;
     this.timer = setTimeout(()=> this.flush(), 700);
   },
-  async flush(){
+  /* un seul envoi à la fois */
+  flush(){
     clearTimeout(this.timer);
+    if(!this.sending) this.sending = this._flush().finally(()=> { this.sending = null; });
+    return this.sending;
+  },
+  async _flush(){
     if(!this.foyer) return false;
+    const foyer = this.foyer;
     try{
-      await db('recettes_app', {
-        method: 'POST',
-        headers: { Prefer:'resolution=merge-duplicates,return=minimal' },
-        body: JSON.stringify([{ id:this.foyer, data:state, updated_at:new Date().toISOString() }])
-      });
-      this.pending = false; this.warned = false;
-      return true;
+      for(let attempt = 0; attempt < 4; attempt++){
+        const local = clone(state);
+        const rows = await db('recettes_app?select=data,updated_at&id=eq.' + encodeURIComponent(foyer));
+        const row = rows && rows[0];
+        const merged = row && row.data ? mergeState(this.getBase(), local, row.data) : local;
+        const stamp = new Date().toISOString();
+        if(row){
+          /* n'enregistre que si personne n'a écrit entre-temps (sinon on refusionne) */
+          const res = await db('recettes_app?id=eq.' + encodeURIComponent(foyer) + '&updated_at=eq.' + encodeURIComponent(row.updated_at), {
+            method:'PATCH', headers:{ Prefer:'return=representation' },
+            body: JSON.stringify({ data:merged, updated_at:stamp })
+          });
+          if(!res || !res.length) continue;
+        } else {
+          await db('recettes_app', {
+            method:'POST', headers:{ Prefer:'resolution=merge-duplicates,return=minimal' },
+            body: JSON.stringify([{ id:foyer, data:merged, updated_at:stamp }])
+          });
+        }
+        if(this.foyer !== foyer) return true;                  // on a changé de foyer pendant l'envoi
+        this.setBase(merged);
+        /* modifié pendant l'envoi : on garde ces nouveautés par-dessus la version fusionnée */
+        const touched = !same(state, local);
+        const next = touched ? mergeState(local, state, merged) : merged;
+        const changed = !same(next, state);
+        state = next; migrer(); store.saveLocal();
+        if(changed) render();
+        this.warned = false;
+        if(touched) this.put(); else this.pending = false;
+        return true;
+      }
+      throw new Error('Trop d’enregistrements simultanés');
     }catch(e){
       /* hors ligne : l'état local reste valable, on renverra à la prochaine occasion */
       if(!this.warned){ this.warned = true; toast('Envoi vers le cloud impossible — modifications gardées en local'); }
@@ -1252,6 +1363,7 @@ async function doLogout(){
   if(!confirm('Se déconnecter ?\nLes données du foyer seront retirées de cet appareil (elles restent en ligne pour les autres membres).')) return;
   if(cloud.on && cloud.pending) await cloud.flush();
   await auth.logout();
+  localStorage.removeItem(LS_BASE + cloud.foyer);
   cloud.on = false; cloud.foyer = ''; cloud.foyers = []; cloud.pending = false;
   localStorage.removeItem(LS_FOYER);
   localStorage.removeItem(LS);
