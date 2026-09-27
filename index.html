@@ -309,6 +309,13 @@
   .ingrow .q{font-weight:800;color:var(--accent-deep);white-space:nowrap}
 
   /* ---------- Divers ---------- */
+  #majBar{
+    position:fixed;left:12px;right:12px;bottom:calc(76px + var(--safe));z-index:55;max-width:616px;margin:0 auto;
+    display:flex;align-items:center;gap:10px;padding:9px 10px 9px 14px;border-radius:10px;
+    background:var(--ink);color:#fff;font-size:13.5px;font-weight:700;box-shadow:0 6px 20px rgba(39,50,74,.3);
+  }
+  #majBar[hidden]{display:none}
+  #majBar span{flex:1}
   #toast{
     position:fixed;left:50%;bottom:calc(84px + var(--safe));transform:translate(-50%,14px);
     background:var(--ink);color:#fff;padding:10px 16px;border-radius:8px;font-size:13.5px;font-weight:600;
@@ -486,6 +493,10 @@
 
 <div class="modal" id="modal"><div class="sheet" id="sheet"></div></div>
 <div id="toast"></div>
+<div id="majBar" hidden>
+  <span>✨ Nouvelle version de l’app disponible</span>
+  <button class="btn sm" id="majGo">Mettre à jour</button>
+</div>
 
 <script>
 /* ============================================================
@@ -1932,6 +1943,51 @@ $('#clearDone').addEventListener('click', ()=>{
 });
 $('#impWeek').addEventListener('change', renderImport);
 
+/* ============================================================
+   MISES À JOUR
+   ------------------------------------------------------------
+   GitHub Pages laisse les navigateurs garder la page en cache
+   ~10 min, et sur iPhone l'app de l'écran d'accueil est souvent
+   « réveillée » sans être rechargée. On compare donc notre propre
+   code à celui publié ; s'il a changé, on recharge l'app.
+   ============================================================ */
+const updater = {
+  last: 0, busy: false,
+  codeOf(doc){ return Array.from(doc.querySelectorAll('script:not([src]), style')).map(e => e.textContent).join('\n§\n'); },
+  mine: null,
+  async check(force){
+    if(this.busy || location.protocol === 'file:') return;
+    if(!force && Date.now() - this.last < 60*1000) return;      // au plus une fois par minute
+    this.busy = true; this.last = Date.now();
+    try{
+      /* « reload » : va chercher la page sur le serveur et remplace la copie en cache */
+      const r = await fetch(location.pathname, { cache:'reload' });
+      if(!r.ok) return;
+      const theirs = this.codeOf(new DOMParser().parseFromString(await r.text(), 'text/html'));
+      if(theirs && theirs !== this.mine) this.ready();
+    }catch(e){ /* hors ligne : on réessaiera plus tard */ }
+    finally{ this.busy = false; }
+  },
+  ready(){
+    /* rien d'ouvert à l'écran et pas de rechargement récent : mise à jour directe */
+    let recent = 0; try{ recent = Number(sessionStorage.getItem('mesrecettes.maj')) || 0; }catch(e){}
+    if(!$('#modal').classList.contains('on') && Date.now() - recent > 2*60*1000) this.apply();
+    else $('#majBar').hidden = false;
+  },
+  async apply(){
+    $('#majBar').hidden = true; toast('Mise à jour de l’app…');
+    try{ sessionStorage.setItem('mesrecettes.maj', String(Date.now())); }catch(e){}
+    if(cloud.on && cloud.pending) await cloud.flush();          // rien ne se perd
+    /* adresse unique : contourne toute copie en cache de l'ancienne version */
+    location.replace(location.pathname + '?maj=' + Date.now() + location.hash);
+  }
+};
+updater.mine = updater.codeOf(document);
+$('#majGo').addEventListener('click', ()=> updater.apply());
+document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'visible') updater.check(); });
+/* on retire le ?maj=… de l'adresse après le rechargement */
+if(new URLSearchParams(location.search).has('maj')) history.replaceState(null, '', location.pathname + location.hash);
+
 /* --- démarrage --- */
 store.local();
 migrer();
@@ -1941,6 +1997,7 @@ scrollToToday();
 const recaler = () => { weekBar.measure(); if(!userScrolled) scrollToToday(); };
 if(document.fonts) document.fonts.ready.then(recaler);
 initCloud().then(recaler);
+setTimeout(()=> updater.check(true), 1500);         // nouvelle version publiée depuis la dernière ouverture ?
 </script>
 </body>
 </html>
