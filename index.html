@@ -140,7 +140,15 @@
     position:sticky;top:var(--hdr, 70px);z-index:15;
     transition:transform .22s ease, opacity .22s ease;
   }
-  #weekBar.stuck{box-shadow:0 6px 18px rgba(39,50,74,.16)}
+  /* bleu clair « intercalaire » pour se détacher du papier blanc */
+  #weekBar{
+    background-color:#E3EBF8;
+    border:1.5px solid rgba(47,93,168,.38);
+    box-shadow:0 2px 0 rgba(47,93,168,.18), 0 4px 12px rgba(39,50,74,.10);
+  }
+  #weekBar .btn.ghost,#weekBar .pill:not(.cloud){background:var(--sheet);border:1px solid rgba(47,93,168,.25)}
+  #weekBar .iconbtn{border-color:rgba(47,93,168,.3)}
+  #weekBar.stuck{box-shadow:0 2px 0 rgba(47,93,168,.18), 0 8px 20px rgba(39,50,74,.20)}
   #weekBar.away{transform:translateY(calc(-100% - var(--hdr, 70px)));opacity:0;pointer-events:none}
   .weeknav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px}
   .weeknav .lab{text-align:center;flex:1;min-width:0}
@@ -231,6 +239,16 @@
   }
   input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
   .grid2{display:grid;grid-template-columns:1fr 96px;gap:8px}
+  label.f .opt{text-transform:none;letter-spacing:0;font-weight:600;color:var(--ink-soft)}
+  .reclink{
+    display:flex;align-items:center;gap:10px;margin:0 0 14px;padding:10px 12px;text-decoration:none;
+    background:var(--accent-soft);border:1px solid rgba(47,93,168,.3);border-radius:8px;color:var(--accent-deep);
+  }
+  .reclink:active{background:#D8E3F5}
+  .reclink-i{font-size:18px}
+  .reclink-t{flex:1;min-width:0;display:flex;flex-direction:column}
+  .reclink-t small{font-size:12px;color:var(--ink-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .reclink-a{font-size:18px;font-weight:800}
   .grid2b{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   .grid2b label.f:first-child{margin-top:12px}
   h2.sec .sec-sub{font-size:19px;color:var(--ink-soft);font-weight:600}
@@ -1328,6 +1346,7 @@ function renderRecipes(){
       <div class="meta">
         <span>⏱ ${r.duration} min</span>
         ${r.servings ? `<span>👥 ${r.servings} pers.</span>` : ''}
+        ${safeUrl(r.url) ? `<span>🔗 ${esc(siteOf(safeUrl(r.url)))}</span>` : ''}
         <span>${ing} ingrédient${ing>1?'s':''}</span>
       </div>
       ${tags?`<div class="tags" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:7px">${tags}</div>`:''}
@@ -1465,6 +1484,19 @@ function openPicker(dateKey, slot){
   paint();
 }
 
+/* lien vers la recette d'origine : uniquement des adresses web (http/https),
+   « marmiton.org/… » est complété en « https://marmiton.org/… » ; null si invalide */
+function safeUrl(v){
+  v = String(v || '').trim();
+  if(!v) return '';
+  if(!/^[a-z][a-z0-9+.-]*:/i.test(v)) v = 'https://' + v;
+  try{
+    const u = new URL(v);
+    return (u.protocol === 'http:' || u.protocol === 'https:') && u.hostname.includes('.') ? u.href : null;
+  }catch(e){ return null; }
+}
+const siteOf = url => { try{ return new URL(url).hostname.replace(/^www\./, ''); }catch(e){ return url; } };
+
 /* ---- fiches recette ---- */
 function openRecipe(id){
   const r = findRecipe(id); if(!r) return;
@@ -1476,6 +1508,8 @@ function openRecipe(id){
       ${r.servings ? `<span class="pill">👥 ${r.servings} personne${r.servings>1?'s':''}</span>` : ''}
       ${(r.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}
     </div>
+    ${safeUrl(r.url) ? `<a class="reclink" href="${esc(safeUrl(r.url))}" target="_blank" rel="noopener noreferrer">
+      <span class="reclink-i">🔗</span><span class="reclink-t"><b>Voir la recette en ligne</b><small>${esc(siteOf(safeUrl(r.url)))}</small></span><span class="reclink-a">↗</span></a>` : ''}
     <h2 class="sec">Ingrédients${r.servings ? ' <small class="sec-sub">pour ' + r.servings + '</small>' : ''}</h2>
     ${ing || '<div class="muted">Aucun ingrédient renseigné.</div>'}
     <div class="foot">
@@ -1542,6 +1576,10 @@ function openRecipeForm(id){
       </div>
       <button type="button" class="btn ghost block" style="margin-top:8px" data-act="adding">+ Ajouter une ligne</button>
 
+      <label class="f">Lien de la recette <span class="opt">(facultatif)</span></label>
+      <input type="text" id="rUrl" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" value="${r&&r.url?esc(r.url):''}" placeholder="https://www.marmiton.org/…">
+      <div class="err" id="rUrlErr" style="min-height:0"></div>
+
       <label class="f">Étiquettes</label>
       <input type="text" id="rTags" list="tagSuggest" value="${r?esc((r.tags||[]).join(', ')):''}" placeholder="végétarien, rapide, hiver…">
       <datalist id="tagSuggest">${existing.map(t=>`<option value="${esc(t)}">`).join('')}</datalist>
@@ -1580,6 +1618,8 @@ function openRecipeForm(id){
     const servings = parseInt($('#rServ').value,10) > 0 ? parseInt($('#rServ').value,10) : null;
     if(!name){ toast('Le nom est obligatoire'); return; }
     if(!(duration > 0)){ toast('La durée doit être un nombre entier positif'); return; }
+    const url = safeUrl($('#rUrl').value);
+    if(url === null){ $('#rUrlErr').textContent = 'Ce lien ne semble pas valide (ex. https://www.marmiton.org/…).'; $('#rUrl').focus(); return; }
     const ingredients = Array.from($$('#ingWrap .ingline')).map(line=>{
       const n = line.querySelector('.i-name').value.trim();
       const q = parseFloat(String(line.querySelector('.i-qty').value).replace(',', '.'));
@@ -1590,9 +1630,9 @@ function openRecipeForm(id){
     const uniqTags = Array.from(new Set(tags));
 
     if(r){
-      Object.assign(r, { name, duration, servings, ingredients, tags:uniqTags });
+      Object.assign(r, { name, duration, servings, url, ingredients, tags:uniqTags });
     } else {
-      state.recipes.push({ id:uid(), name, duration, servings, ingredients, tags:uniqTags });
+      state.recipes.push({ id:uid(), name, duration, servings, url, ingredients, tags:uniqTags });
     }
     store.save(); render(); closeModal();
     toast(r?'Recette mise à jour':'Recette ajoutée');
