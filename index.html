@@ -284,7 +284,15 @@
     animation:up .22s cubic-bezier(.2,.8,.3,1);
   }
   @keyframes up{from{transform:translateY(24px);opacity:.6}to{transform:none;opacity:1}}
-  .grab{width:40px;height:4px;border-radius:3px;background:var(--line);margin:6px auto 12px}
+  .grab{width:44px;height:5px;border-radius:3px;background:#CFC8B8;margin:4px auto 12px;position:relative}
+  .grab::before{content:"";position:absolute;left:-60px;right:-60px;top:-14px;bottom:-14px}   /* zone de prise plus large */
+  .sheet{overscroll-behavior:contain;touch-action:pan-y}
+  .sheet.dragging{transition:none!important;animation:none}
+  .sheet.settle{transition:transform .22s cubic-bezier(.2,.8,.3,1)}
+  .slotday.has{border-color:var(--hl-line)}
+  .slotday.has .pill{background:var(--hl-soft);color:var(--ink)}
+  /* créneau déjà au menu : même jaune « post-it » que les plats du calendrier */
+  .btn.slot-done{background:var(--hl-soft);color:var(--ink);box-shadow:0 1px 2px rgba(120,100,30,.12);border:1px solid var(--hl-line);cursor:default}
   .sheet h2{margin:0 0 12px;font-family:var(--hand);font-size:32px;line-height:1.05;font-weight:700;color:var(--accent-deep)}
   .sheet .foot{display:flex;gap:9px;margin-top:18px}
   .sheet .foot .btn{flex:1}
@@ -1454,7 +1462,9 @@ function render(){
    MODALES
    ============================================================ */
 function openModal(html){
-  $('#sheet').innerHTML = '<div class="grab"></div>' + html;
+  const sh = $('#sheet');
+  sh.classList.remove('dragging','settle'); sh.style.transform = ''; $('#modal').style.background = '';
+  sh.innerHTML = '<div class="grab"></div>' + html;
   $('#modal').classList.add('on');
   document.body.style.overflow = 'hidden';
 }
@@ -1464,6 +1474,56 @@ function closeModal(){
   document.body.style.overflow = '';
 }
 $('#modal').addEventListener('click', e => { if(e.target.id === 'modal') closeModal(); });
+
+/* ---- fermer une fenêtre en la faisant glisser vers le bas ----
+   depuis la poignée / le haut de la fenêtre, ou n'importe où quand son
+   contenu est déjà tout en haut (comme les fenêtres des apps iPhone) */
+(function(){
+  const sh = $('#sheet'), modal = $('#modal');
+  let y0 = 0, x0 = 0, dy = 0, mode = '';                // mode : '' (à décider), 'drag', 'scroll'
+  let vy = 0, lastY = 0, lastT = 0;                      // élan du doigt au moment du lâcher (px/ms)
+  sh.addEventListener('touchstart', e=>{
+    if(e.touches.length !== 1) return;
+    const t = e.touches[0];
+    y0 = lastY = t.clientY; x0 = t.clientX; lastT = Date.now(); dy = 0; vy = 0;
+    const onTop = t.clientY - sh.getBoundingClientRect().top < 56;   // poignée + titre
+    mode = (onTop || sh.scrollTop <= 0) ? '' : 'scroll';
+  }, { passive:true });
+  sh.addEventListener('touchmove', e=>{
+    if(mode === 'scroll' || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    dy = t.clientY - y0;
+    if(mode === ''){
+      if(Math.abs(dy) < 6 && Math.abs(t.clientX - x0) < 6) return;
+      /* vers le bas et plutôt vertical : on tire la fenêtre ; sinon on laisse défiler */
+      mode = (dy > 0 && Math.abs(dy) > Math.abs(t.clientX - x0)) ? 'drag' : 'scroll';
+      if(mode === 'scroll') return;
+      sh.classList.add('dragging');
+      if(document.activeElement && sh.contains(document.activeElement)) document.activeElement.blur();
+    }
+    e.preventDefault();
+    const now = Date.now();
+    if(now > lastT){ vy = (t.clientY - lastY) / (now - lastT); lastY = t.clientY; lastT = now; }
+    const d = Math.max(0, dy);
+    sh.style.transform = 'translateY(' + d + 'px)';
+    modal.style.background = 'rgba(39,50,74,' + (0.38 * Math.max(0, 1 - d / sh.offsetHeight)).toFixed(3) + ')';
+  }, { passive:false });
+  const end = ()=>{
+    if(mode !== 'drag'){ mode = ''; return; }
+    mode = '';
+    sh.classList.remove('dragging'); sh.classList.add('settle');
+    /* assez tirée vers le bas, ou lâchée avec de l'élan vers le bas */
+    if(dy > Math.min(140, sh.offsetHeight * 0.3) || (dy > 30 && vy > 0.5)){
+      sh.style.transform = 'translateY(100%)'; modal.style.background = 'rgba(39,50,74,0)';
+      setTimeout(()=>{ closeModal(); sh.classList.remove('settle'); sh.style.transform = ''; modal.style.background = ''; }, 200);
+    } else {
+      sh.style.transform = ''; modal.style.background = '';
+      setTimeout(()=> sh.classList.remove('settle'), 230);
+    }
+  };
+  sh.addEventListener('touchend', end);
+  sh.addEventListener('touchcancel', end);
+})();
 
 /* ---- choisir une recette pour un créneau ---- */
 let pickerCtx = null;
@@ -1663,12 +1723,17 @@ function openSlotPicker(recipeId){
     <div class="muted" style="margin-bottom:12px">Semaine ${week} — choisis le jour et le moment.</div>
     ${dates.map(d=>{
       const key = isoOf(d);
-      return `<div class="card" style="margin-bottom:9px;box-shadow:none">
+      /* créneaux où cette recette est déjà au menu */
+      const done = SLOTS.filter(s => ((state.plan[key] || {})[s.k] || []).some(e => eidOf(e) === recipeId));
+      return `<div class="card slotday${done.length ? ' has' : ''}" style="margin-bottom:9px;box-shadow:none">
         <div class="row" style="justify-content:space-between;margin-bottom:8px">
           <b style="font-size:14.5px">${DAYS[(d.getDay()+6)%7]} ${fmtDate(d)}</b>
+          ${done.length ? `<span class="pill">✓ déjà prévue ${done.map(s=>s.l.toLowerCase()).join(' et ')}</span>` : ''}
         </div>
         <div class="row">
-          ${SLOTS.map(s=>`<button class="btn ghost sm" style="flex:1" data-act="doplan" data-id="${recipeId}" data-date="${key}" data-slot="${s.k}">${s.l}</button>`).join('')}
+          ${SLOTS.map(s => done.includes(s)
+            ? `<span class="btn sm slot-done" style="flex:1" aria-label="${s.l} : déjà prévue">✓ ${s.l}</span>`
+            : `<button class="btn ghost sm" style="flex:1" data-act="doplan" data-id="${recipeId}" data-date="${key}" data-slot="${s.k}">${s.l}</button>`).join('')}
         </div>
       </div>`;
     }).join('')}
