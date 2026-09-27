@@ -210,6 +210,9 @@
   .chip[data-act]{cursor:pointer;transition:transform .08s, box-shadow .12s}
   .chip[data-act]:active{transform:scale(.985);box-shadow:none}
   .chip .go{display:inline-block;margin-left:6px;color:var(--accent);font-weight:800;font-size:17px;line-height:1}
+  .pickbar{display:flex;gap:8px;align-items:flex-start;margin-bottom:12px}
+  .pickbar .searchwrap{flex:1;min-width:0;margin-bottom:0}
+  .pickbar select{width:auto;max-width:42%;flex:none;padding:10px 8px}
   .slotweek{font-family:var(--hand);font-size:23px;font-weight:700;color:var(--accent-deep);margin:14px 0 6px}
   .slotday-h{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;min-width:0}
   .daycount{font-size:12px;font-weight:800;color:var(--accent-deep);background:var(--accent-soft);border-radius:10px;padding:1px 8px;white-space:nowrap}
@@ -1587,26 +1590,46 @@ function openPicker(dateKey, slot){
   const already = (day[slot] || []).map(eidOf);
   openModal(`
     <h2>Ajouter au ${DAYS[(new Date(dateKey+'T12:00:00').getDay()+6)%7].toLowerCase()} ${SLOTS.find(s=>s.k===slot).l.toLowerCase()}</h2>
-    <div class="searchwrap">
-      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
-      <input type="search" id="pickQ" placeholder="Rechercher…" autocomplete="off">
+    <div class="pickbar">
+      <div class="searchwrap">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
+        <input type="search" id="pickQ" placeholder="Rechercher…" autocomplete="off">
+      </div>
+      ${tagCounts().length ? `<select id="pickTag" aria-label="Filtrer par étiquette">
+        <option value="">🏷 Toutes</option>
+        ${tagCounts().map(([t,n]) => `<option value="${esc(t)}">${esc(t)} (${n})</option>`).join('')}
+      </select>` : ''}
     </div>
-    <div id="pickList" style="max-height:52vh;overflow-y:auto"></div>
-    <div class="foot"><button class="btn ghost" data-act="closemodal">Fermer</button></div>
+    <div id="pickList" style="max-height:48vh;overflow-y:auto"></div>
+    <div class="foot">
+      <button class="btn ghost" data-act="closemodal">Fermer</button>
+      <button class="btn" id="pickNew">+ Nouvelle recette</button>
+    </div>
   `);
   const paint = () => {
     const q = ($('#pickQ').value||'').trim().toLowerCase();
+    const tag = $('#pickTag') ? $('#pickTag').value : '';
     let list = state.recipes.slice().sort((a,b)=>a.name.localeCompare(b.name,'fr'));
-    if(q) list = list.filter(r=>r.name.toLowerCase().includes(q));
+    if(q) list = list.filter(r => r.name.toLowerCase().includes(q) || (r.ingredients||[]).some(i => i.name.toLowerCase().includes(q)));
+    if(tag) list = list.filter(r => (r.tags||[]).includes(tag));
     $('#pickList').innerHTML = list.length ? list.map(r=>`
       <div class="rec" style="margin-bottom:8px" data-act="doplan" data-id="${r.id}">
         <h3>${esc(r.name)}</h3>
-        <div class="meta"><span>⏱ ${r.duration} min</span>${already.includes(r.id)?'<span class="pill">déjà prévu</span>':''}</div>
+        <div class="meta"><span>⏱ ${r.duration} min</span>${(r.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}${already.includes(r.id)?'<span class="pill">déjà prévu</span>':''}</div>
       </div>`).join('')
-      : `<div class="empty">Aucune recette. Crée-en une depuis l’onglet Recettes.</div>`;
+      : `<div class="empty">${state.recipes.length ? 'Aucune recette ne correspond.' : 'Aucune recette pour l’instant.'}<br><span class="muted">Tu peux en créer une avec « + Nouvelle recette ».</span></div>`;
   };
   $('#pickQ').addEventListener('input', paint);
+  if($('#pickTag')) $('#pickTag').addEventListener('change', paint);
+  /* nouvelle recette : ajoutée directement à ce créneau une fois créée */
+  $('#pickNew').addEventListener('click', ()=> openRecipeForm(null, { plan:{ dateKey, slot }, name:$('#pickQ').value.trim() }));
   paint();
+}
+/* étiquettes utilisées, avec leur nombre de recettes, triées par nom */
+function tagCounts(){
+  const c = {};
+  state.recipes.forEach(r => (r.tags||[]).forEach(t => c[t] = (c[t]||0) + 1));
+  return Object.keys(c).sort((a,b)=>a.localeCompare(b,'fr')).map(t => [t, c[t]]);
 }
 
 /* lien vers la recette d'origine : uniquement des adresses web (http/https),
@@ -1673,7 +1696,7 @@ function ingredientRow(name='', qty='', unit='g'){
   </div>`;
 }
 
-function openRecipeForm(id){
+function openRecipeForm(id, opts = {}){
   const r = id ? findRecipe(id) : null;
   const existing = Array.from(new Set(state.recipes.flatMap(x=>x.tags||[]))).sort((a,b)=>a.localeCompare(b,'fr'));
   openModal(`
@@ -1711,7 +1734,7 @@ function openRecipeForm(id){
       <div class="muted" style="margin-top:5px">Sépare-les par des virgules.</div>
 
       <div class="foot">
-        <button type="button" class="btn ghost" data-act="closemodal">Annuler</button>
+        <button type="button" class="btn ghost" id="rCancel">Annuler</button>
         <button type="submit" class="btn">${r?'Enregistrer':'Créer la recette'}</button>
       </div>
     </form>
@@ -1735,6 +1758,9 @@ function openRecipeForm(id){
     const n = parseInt($('#rServ').value, 10);
     $('#ingFor').textContent = n > 0 ? 'Quantités pour ' + n + ' personne' + (n>1?'s':'') : 'Quantités pour le nombre de personnes indiqué ci-dessus';
   });
+  /* Annuler : retour à la liste du créneau si on venait du calendrier */
+  $('#rCancel').addEventListener('click', ()=> opts.plan ? openPicker(opts.plan.dateKey, opts.plan.slot) : closeModal());
+  if(!r && opts.name) $('#rName').value = opts.name;
   const form = $('#recForm');
   form.addEventListener('submit', ev=>{
     ev.preventDefault();
@@ -1759,8 +1785,16 @@ function openRecipeForm(id){
     } else {
       state.recipes.push({ id:uid(), name, duration, servings, url, ingredients, tags:uniqTags });
     }
+    /* créée depuis « + Ajouter une recette » du calendrier : on la met au menu */
+    const to = !r && opts.plan;
+    if(to && !isPastKey(to.dateKey)){
+      const newId = state.recipes[state.recipes.length - 1].id;
+      const day = state.plan[to.dateKey] = state.plan[to.dateKey] || { midi:[], soir:[] };
+      day[to.slot] = day[to.slot] || [];
+      day[to.slot].push({ id:newId, who:'' });
+    }
     store.save(); render(); closeModal();
-    toast(r?'Recette mise à jour':'Recette ajoutée');
+    toast(r ? 'Recette mise à jour' : to ? 'Recette créée et ajoutée au ' + DAYS[weekdayOf(to.dateKey)].toLowerCase() + ' ' + to.slot : 'Recette ajoutée');
   });
 }
 
