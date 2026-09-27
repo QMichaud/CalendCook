@@ -168,6 +168,14 @@
     margin-bottom:12px;overflow:hidden;box-shadow:var(--shadow);
     scroll-margin-top:calc(98px + env(safe-area-inset-top,0px));   /* ne passe pas sous l'en-tête */
   }
+  .slotsw{display:flex;gap:5px;margin-left:auto;align-self:center}
+  .sw{
+    display:inline-flex;align-items:center;gap:4px;border:1.5px solid var(--line);background:var(--sheet);
+    border-radius:7px;padding:3px 7px 3px 5px;font-size:12px;font-weight:800;color:var(--ink-soft);cursor:pointer;
+  }
+  .sw-box{width:14px;height:14px;border-radius:3px;border:1.5px solid currentColor;display:inline-flex;align-items:center;justify-content:center;font-size:10px;line-height:1}
+  .sw.on{color:var(--accent-deep);border-color:rgba(47,93,168,.4);background:var(--accent-soft)}
+  .day-h{flex-wrap:wrap;row-gap:6px}
   .day-h{
     display:flex;align-items:baseline;gap:8px;padding:8px 13px 4px;
     border-bottom:1.5px solid rgba(201,83,76,.4);           /* trait de marge rouge */
@@ -1215,6 +1223,8 @@ async function doLogout(){
 /* ============================================================
    OUTILS "RECETTES DANS LE PLAN"
    ============================================================ */
+/* créneau masqué pour ce jour-là (coches « Midi » / « Soir » du calendrier) */
+function slotOff(dateKey, k){ return ((state.plan[dateKey] || {}).off || []).includes(k); }
 function recipesOfDay(dateKey){
   const day = state.plan[dateKey] || {};
   return SLOTS.flatMap(s => (day[s.k]||[]));
@@ -1279,7 +1289,8 @@ function renderWeek(){
     const day = state.plan[key] || {};
     const isToday = key === todayKey;
     const isPast = key < todayKey;                 // dates ISO : l'ordre alphabétique est l'ordre chronologique
-    const slots = SLOTS.map(s=>{
+    const shownSlots = SLOTS.filter(s => !slotOff(key, s.k));
+    const slots = !shownSlots.length ? '<div class="slot-none">Pas de repas prévu ce jour-là</div>' : shownSlots.map(s=>{
       const list = day[s.k] || [];
       return `
         <div class="slot">
@@ -1305,6 +1316,8 @@ function renderWeek(){
         <span class="dname">${DAYS[(d.getDay()+6)%7]}</span>
         <span class="dnum">${fmtDate(d)}</span>
         ${isToday?'<span class="badge">Aujourd’hui</span>':''}
+        ${isPast ? '' : `<span class="slotsw">${SLOTS.map(s => { const on = !slotOff(key, s.k);
+          return `<button class="sw${on?' on':''}" data-act="slotsw" data-date="${key}" data-slot="${s.k}" aria-pressed="${on}" aria-label="Afficher le ${s.l.toLowerCase()}"><span class="sw-box">${on?'✓':''}</span>${s.l}</button>`; }).join('')}</span>`}
       </div>
       <div class="slots">${slots}</div>
     </div>`;
@@ -1744,6 +1757,7 @@ function openSlotPicker(recipeId){
       /* tous les plats déjà prévus ce jour-là (toutes recettes confondues) */
       const dayNames = recipesOfDay(key).map(e => findRecipe(eidOf(e))).filter(Boolean).map(x => x.name);
       const n = dayNames.length;
+      const open = SLOTS.filter(s => !slotOff(key, s.k));          // créneaux affichés ce jour-là
       return head + `<div class="card slotday${done.length ? ' has' : ''}" style="margin-bottom:9px;box-shadow:none">
         <div class="row" style="justify-content:space-between;margin-bottom:8px">
           <span class="slotday-h"><b style="font-size:14.5px">${DAYS[(d.getDay()+6)%7]} ${fmtDate(d)}</b>
@@ -1751,7 +1765,7 @@ function openSlotPicker(recipeId){
           ${done.length ? `<span class="pill">✓ déjà prévue ${done.map(s=>s.l.toLowerCase()).join(' et ')}</span>` : ''}
         </div>
         <div class="row">
-          ${SLOTS.map(s => done.includes(s)
+          ${!open.length ? '<span class="muted">Pas de repas prévu ce jour-là</span>' : open.map(s => done.includes(s)
             ? `<span class="btn sm slot-done" style="flex:1" aria-label="${s.l} : déjà prévue">✓ ${s.l}</span>`
             : `<button class="btn ghost sm" style="flex:1" data-act="doplan" data-id="${recipeId}" data-date="${key}" data-slot="${s.k}">${s.l}</button>`).join('')}
         </div>
@@ -1870,6 +1884,20 @@ document.addEventListener('click', e=>{
       store.save(); render(); break;
     }
     case 'plan':    openPicker(t.dataset.date, t.dataset.slot); break;
+    case 'slotsw': {                              // coche « Midi » / « Soir » d'un jour
+      const key = t.dataset.date, slot = t.dataset.slot;
+      if(isPastKey(key)) break;
+      const day = state.plan[key] = state.plan[key] || { midi:[], soir:[] };
+      const off = new Set(day.off || []);
+      if(!off.has(slot)){
+        const n = (day[slot] || []).length;
+        if(n){ toast('Retire d’abord ' + (n>1 ? 'les ' + n + ' plats' : 'le plat') + ' du ' + slot + ' pour masquer ce créneau'); break; }
+        off.add(slot);
+      } else off.delete(slot);
+      if(off.size) day.off = Array.from(off); else delete day.off;
+      store.save(); renderWeek();
+      break;
+    }
     case 'doplan': {
       const key = t.dataset.date;
       const slot = t.dataset.slot || (pickerCtx && pickerCtx.slot);
