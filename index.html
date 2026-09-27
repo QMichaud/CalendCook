@@ -2123,9 +2123,9 @@ function changeWeek(delta, from = delta){
 }
 
 /* ---- glisser le doigt sur les jours pour changer de semaine ----
-   vers la droite : semaine suivante ; vers la gauche : semaine précédente
-   (pour inverser, passer SWIPE_NEXT à -1) */
-const SWIPE_NEXT = 1;
+   comme on tourne une page : vers la gauche = semaine suivante,
+   vers la droite = semaine précédente (pour inverser, passer SWIPE_NEXT à 1) */
+const SWIPE_NEXT = -1;
 (function(){
   const wd = $('#weekDays');
   let x0 = 0, y0 = 0, dx = 0, mode = '', vx = 0, lastX = 0, lastT = 0;
