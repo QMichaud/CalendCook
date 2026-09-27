@@ -148,6 +148,7 @@
   }
   #weekBar .btn.ghost,#weekBar .pill:not(.cloud){background:var(--sheet);border:1px solid rgba(47,93,168,.25)}
   #weekBar .iconbtn{border-color:rgba(47,93,168,.3)}
+  #weekBar .row{flex-wrap:wrap;row-gap:8px}          /* petits écrans : le compteur passe à la ligne */
   #weekBar.stuck{box-shadow:0 2px 0 rgba(47,93,168,.18), 0 8px 20px rgba(39,50,74,.20)}
   #weekBar.away{transform:translateY(calc(-100% - var(--hdr, 70px)));opacity:0;pointer-events:none}
   .weeknav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px}
@@ -440,6 +441,7 @@
         <button class="btn ghost sm" id="todayBtn">Cette semaine</button>
         <button class="btn ghost sm" id="pickWeekBtn">Choisir</button>
         <button class="btn ghost sm" id="eatersBtn">Pour qui ?</button>
+        <button class="btn ghost sm" id="mealsBtn" aria-label="Repas affichés par défaut" title="Repas affichés">⚙</button>
         <span style="flex:1"></span>
         <span class="pill" id="wCount">0 plat</span>
       </div>
@@ -1223,8 +1225,35 @@ async function doLogout(){
 /* ============================================================
    OUTILS "RECETTES DANS LE PLAN"
    ============================================================ */
-/* créneau masqué pour ce jour-là (coches « Midi » / « Soir » du calendrier) */
-function slotOff(dateKey, k){ return ((state.plan[dateKey] || {}).off || []).includes(k); }
+/* ---- repas affichés (coches « Midi » / « Soir ») ----
+   state.mealDefaults : réglage par défaut par jour de la semaine, ex. { "2": ["midi"] }
+                        = pas de midi le mercredi (0 = lundi … 6 = dimanche)
+   plan[date].show    : exception pour une date précise, ex. { midi:true }
+   state.mealAsked    : questions « tous les mercredis ? » déjà posées, ex. ["2-midi"]
+   Un créneau qui contient un plat reste toujours affiché. */
+const weekdayOf = key => (new Date(key + 'T12:00:00').getDay() + 6) % 7;
+function defaultOff(wd, k){ return ((state.mealDefaults || {})[wd] || []).includes(k); }
+function slotOff(dateKey, k){
+  const day = state.plan[dateKey] || {};
+  if((day[k] || []).length) return false;
+  if(day.show && k in day.show) return !day.show[k];
+  return defaultOff(weekdayOf(dateKey), k);
+}
+function setDefaultOff(wd, k, off){
+  const d = state.mealDefaults = state.mealDefaults || {};
+  const set = new Set(d[wd] || []);
+  off ? set.add(k) : set.delete(k);
+  if(set.size) d[wd] = Array.from(set); else delete d[wd];
+}
+function setDayShow(key, k, on){                // on = null : suit le réglage par défaut
+  const day = state.plan[key] = state.plan[key] || { midi:[], soir:[] };
+  const show = Object.assign({}, day.show);
+  if(on === null) delete show[k]; else show[k] = on;
+  if(Object.keys(show).length) day.show = show; else delete day.show;
+}
+function markAsked(wd, k){
+  const a = new Set(state.mealAsked || []); a.add(wd + '-' + k); state.mealAsked = Array.from(a);
+}
 function recipesOfDay(dateKey){
   const day = state.plan[dateKey] || {};
   return SLOTS.flatMap(s => (day[s.k]||[]));
@@ -1254,6 +1283,10 @@ function migrer(){
         day[s.k] = [];
       }
     });
+    if(Array.isArray(day.off)){                    // ancien format des coches → exceptions « show »
+      day.show = Object.assign({}, day.show); day.off.forEach(x => day.show[x] = false);
+      delete day.off; changed = true;
+    }
     state.plan[k] = day;
   });
   if(changed) localStorage.setItem(LS, JSON.stringify(state));
@@ -1775,6 +1808,36 @@ function openSlotPicker(recipeId){
   `);
 }
 
+/* ---- « Tous les mercredis ? » : posée la première fois qu'on coche / décoche un repas ---- */
+function askMealScope(key, slot, want){
+  const wd = weekdayOf(key), jour = DAYS[wd].toLowerCase(), repas = slot === 'midi' ? 'le midi' : 'le soir';
+  const d = new Date(key + 'T12:00:00');
+  openModal(`
+    <h2>${want ? 'Afficher' : 'Masquer'} ${repas}</h2>
+    <div class="muted" style="margin-bottom:14px">Veux-tu ${want ? 'afficher' : 'masquer'} ${repas} <b>tous les ${jour}s</b> par défaut, ou seulement le ${jour} ${fmtDate(d)} ?</div>
+    <button class="btn block" data-act="mealscope" data-scope="all" data-date="${key}" data-slot="${slot}" data-want="${want?1:0}">Tous les ${jour}s</button>
+    <button class="btn ghost block" style="margin-top:9px" data-act="mealscope" data-scope="day" data-date="${key}" data-slot="${slot}" data-want="${want?1:0}">Seulement ce ${jour} ${fmtDate(d)}</button>
+    <div class="muted" style="margin-top:12px;font-size:12.5px">Cette question n’est posée qu’une fois. Tu pourras changer le réglage à tout moment avec le bouton ⚙ du calendrier.</div>
+  `);
+}
+/* ---- réglage par défaut des repas affichés, jour par jour ---- */
+function openMealSettings(){
+  const today = isoOf(new Date());
+  const exceptions = Object.keys(state.plan).filter(k => k >= today && state.plan[k].show).length;
+  openModal(`
+    <h2>Repas affichés</h2>
+    <div class="muted" style="margin-bottom:12px">Choisis les repas affichés par défaut pour chaque jour de la semaine. Les coches d’un jour précis du calendrier restent possibles pour une exception.</div>
+    <div class="card" style="padding:4px 12px;box-shadow:none;margin:0">
+      ${DAYS.map((name, wd) => `<div class="shopitem"><div class="txt">${name}</div>
+        <span class="slotsw">${SLOTS.map(s => { const on = !defaultOff(wd, s.k);
+          return `<button class="sw${on?' on':''}" data-act="mealdef" data-wd="${wd}" data-slot="${s.k}" aria-pressed="${on}"><span class="sw-box">${on?'✓':''}</span>${s.l}</button>`; }).join('')}</span></div>`).join('')}
+    </div>
+    <div class="muted" style="margin-top:10px">Un repas qui contient déjà un plat reste toujours affiché.</div>
+    ${exceptions ? `<button class="btn line block" style="margin-top:12px" data-act="mealreset">Annuler les ${exceptions} exception${exceptions>1?'s':''} des jours à venir</button>` : ''}
+    <div class="foot"><button class="btn ghost" data-act="closemodal">Fermer</button></div>
+  `);
+}
+
 /* ---- destinataire d'un plat (« pour qui ») ---- */
 function openWhofor(dateKey, slot, rid){
   const entry = ((state.plan[dateKey]||{})[slot]||[]).find(e => eidOf(e) === rid);
@@ -1887,15 +1950,34 @@ document.addEventListener('click', e=>{
     case 'slotsw': {                              // coche « Midi » / « Soir » d'un jour
       const key = t.dataset.date, slot = t.dataset.slot;
       if(isPastKey(key)) break;
-      const day = state.plan[key] = state.plan[key] || { midi:[], soir:[] };
-      const off = new Set(day.off || []);
-      if(!off.has(slot)){
-        const n = (day[slot] || []).length;
-        if(n){ toast('Retire d’abord ' + (n>1 ? 'les ' + n + ' plats' : 'le plat') + ' du ' + slot + ' pour masquer ce créneau'); break; }
-        off.add(slot);
-      } else off.delete(slot);
-      if(off.size) day.off = Array.from(off); else delete day.off;
-      store.save(); renderWeek();
+      const want = slotOff(key, slot);              // true = on veut l'afficher
+      const n = ((state.plan[key] || {})[slot] || []).length;
+      if(!want && n){ toast('Retire d’abord ' + (n>1 ? 'les ' + n + ' plats' : 'le plat') + ' du ' + slot + ' pour masquer ce créneau'); break; }
+      const wd = weekdayOf(key);
+      if(want === !defaultOff(wd, slot)){ setDayShow(key, slot, null); store.save(); renderWeek(); break; }   // retour au réglage habituel
+      if((state.mealAsked || []).includes(wd + '-' + slot)){ setDayShow(key, slot, want); store.save(); renderWeek(); break; }
+      askMealScope(key, slot, want);              // première fois : ce jour seulement, ou tous les X ?
+      break;
+    }
+    case 'mealscope': {
+      const key = t.dataset.date, slot = t.dataset.slot, want = t.dataset.want === '1', wd = weekdayOf(key);
+      if(t.dataset.scope === 'all'){ setDefaultOff(wd, slot, !want); setDayShow(key, slot, null); }
+      else setDayShow(key, slot, want);
+      markAsked(wd, slot);
+      store.save(); closeModal(); renderWeek();
+      toast(t.dataset.scope === 'all' ? 'Réglage appliqué à tous les ' + DAYS[wd].toLowerCase() + 's' : 'Réglage appliqué à ce jour seulement');
+      break;
+    }
+    case 'mealdef': {                             // écran « Repas affichés »
+      const wd = Number(t.dataset.wd), slot = t.dataset.slot;
+      setDefaultOff(wd, slot, !defaultOff(wd, slot)); markAsked(wd, slot);
+      store.save(); renderWeek(); openMealSettings();
+      break;
+    }
+    case 'mealreset': {
+      const today = isoOf(new Date());
+      Object.keys(state.plan).forEach(k => { if(k >= today && state.plan[k].show) delete state.plan[k].show; });
+      store.save(); renderWeek(); openMealSettings(); toast('Les jours à venir suivent de nouveau le réglage habituel');
       break;
     }
     case 'doplan': {
@@ -2000,6 +2082,7 @@ $('#nextW2').addEventListener('click', ()=>{
 });
 $('#todayBtn').addEventListener('click', ()=>{ ANCHOR = new Date(); ANCHOR.setHours(0,0,0,0); render(); scrollToToday(true); });
 $('#eatersBtn').addEventListener('click', openEaterForm);
+$('#mealsBtn').addEventListener('click', openMealSettings);
 $('#acctBtn').addEventListener('click', ()=> auth.session ? toggleMenu() : openLogin());
 
 $('#pickWeekBtn').addEventListener('click', ()=>{
