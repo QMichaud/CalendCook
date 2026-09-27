@@ -136,6 +136,11 @@
   /* ---------- Semaine ---------- */
   /* bloc des semaines : reste accroché sous l'en-tête, caché quand on descend,
      il réapparaît dès qu'on remonte */
+  #weekDays{touch-action:pan-y}                      /* le glissement horizontal change de semaine */
+  #weekDays.wk-drag{transition:none}
+  #weekDays.wk-back{transition:transform .2s ease, opacity .2s ease}
+  #weekDays.wk-in{animation:wkIn .24s cubic-bezier(.2,.8,.3,1)}
+  @keyframes wkIn{from{transform:translateX(var(--wk-from, 40px));opacity:.2}to{transform:none;opacity:1}}
   #weekBar{
     position:sticky;top:var(--hdr, 70px);z-index:15;
     transition:transform .22s ease, opacity .22s ease;
@@ -2100,8 +2105,65 @@ $$('nav.tabs button').forEach(b=>{
 });
 
 /* --- semaine --- */
-$('#prevW').addEventListener('click', ()=>{ ANCHOR = addDays(ANCHOR,-7); render(); });
-$('#nextW').addEventListener('click', ()=>{ ANCHOR = addDays(ANCHOR,7); render(); });
+$('#prevW').addEventListener('click', ()=> changeWeek(-1));
+$('#nextW').addEventListener('click', ()=> changeWeek(1));
+
+/* ---- changer de semaine, avec un petit glissement ----
+   from : côté d'où arrive la nouvelle semaine (+1 = de la droite, -1 = de la gauche) */
+function changeWeek(delta, from = delta){
+  ANCHOR = addDays(ANCHOR, 7 * delta);
+  render();
+  const wd = $('#weekDays');
+  wd.classList.remove('wk-in'); wd.style.transform = ''; wd.style.opacity = '';
+  wd.style.setProperty('--wk-from', (from > 0 ? 40 : -40) + 'px');
+  void wd.offsetWidth; wd.classList.add('wk-in');
+  /* semaine en cours : sur le jour actuel ; sinon en haut de la semaine */
+  if(isoWeek(ANCHOR).week === isoWeek(new Date()).week && isoWeek(ANCHOR).year === isoWeek(new Date()).year) scrollToToday();
+  else if(window.scrollY > $('#v-cal').offsetTop) window.scrollTo({ top:0 });
+}
+
+/* ---- glisser le doigt sur les jours pour changer de semaine ----
+   comme on tourne une page : vers la gauche = semaine suivante,
+   vers la droite = semaine précédente (pour inverser, passer SWIPE_NEXT à 1) */
+const SWIPE_NEXT = -1;
+(function(){
+  const wd = $('#weekDays');
+  let x0 = 0, y0 = 0, dx = 0, mode = '', vx = 0, lastX = 0, lastT = 0;
+  wd.addEventListener('touchstart', e=>{
+    if(e.touches.length !== 1){ mode = 'no'; return; }
+    x0 = lastX = e.touches[0].clientX; y0 = e.touches[0].clientY; dx = 0; vx = 0; lastT = Date.now(); mode = '';
+  }, { passive:true });
+  wd.addEventListener('touchmove', e=>{
+    if(mode === 'no' || mode === 'v' || e.touches.length !== 1) return;
+    const t = e.touches[0]; dx = t.clientX - x0; const dy = t.clientY - y0;
+    if(mode === ''){
+      if(Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+      /* nettement horizontal : on change de semaine ; sinon on laisse défiler la page */
+      mode = Math.abs(dx) > Math.abs(dy) * 1.4 ? 'h' : 'v';
+      if(mode === 'v') return;
+      wd.classList.remove('wk-in'); wd.classList.add('wk-drag');
+    }
+    e.preventDefault();
+    const now = Date.now(); if(now > lastT){ vx = (t.clientX - lastX) / (now - lastT); lastX = t.clientX; lastT = now; }
+    wd.style.transform = 'translateX(' + (dx * 0.6) + 'px)';
+    wd.style.opacity = String(Math.max(0.35, 1 - Math.abs(dx) / 600));
+  }, { passive:false });
+  const end = ()=>{
+    if(mode !== 'h'){ mode = ''; return; }
+    mode = '';
+    wd.classList.remove('wk-drag');
+    const dir = Math.sign(dx);
+    if(Math.abs(dx) > 70 || (Math.abs(dx) > 30 && Math.abs(vx) > 0.5)){
+      /* la semaine part du côté du doigt, la nouvelle arrive de l'autre côté */
+      changeWeek(dir * SWIPE_NEXT, -dir);
+    } else {
+      wd.classList.add('wk-back'); wd.style.transform = ''; wd.style.opacity = '';
+      setTimeout(()=> wd.classList.remove('wk-back'), 220);
+    }
+  };
+  wd.addEventListener('touchend', end);
+  wd.addEventListener('touchcancel', end);
+})();
 $('#prevW2').addEventListener('click', ()=>{
   const [y,w] = $('#impWeek').value.split('-').map(Number);
   const prev = w>1 ? [y,w-1] : [y-1,weeksInYear(y-1)];
