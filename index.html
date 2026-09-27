@@ -198,6 +198,12 @@
   .slot:last-child{margin-bottom:3px}
   .slot-t{font-size:11px;text-transform:uppercase;letter-spacing:.8px;color:var(--red);margin:2px 0 5px 2px;font-weight:800}
   /* un plat = un post-it */
+  .chip[data-act]{cursor:pointer;transition:transform .08s, box-shadow .12s}
+  .chip[data-act]:active{transform:scale(.985);box-shadow:none}
+  .chip .go{display:inline-block;margin-left:6px;color:var(--accent);font-weight:800;font-size:17px;line-height:1}
+  .slotday-h{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;min-width:0}
+  .daycount{font-size:12px;font-weight:800;color:var(--accent-deep);background:var(--accent-soft);border-radius:10px;padding:1px 8px;white-space:nowrap}
+  .daycount.none{background:transparent;color:var(--ink-soft);font-weight:600;padding:0}
   .chip{
     display:flex;align-items:center;gap:8px;background:var(--hl-soft);
     border:1px solid var(--hl-line);border-radius:3px;padding:8px 10px;margin-bottom:6px;
@@ -1282,8 +1288,9 @@ function renderWeek(){
             const r = findRecipe(id);
             if(!r) return '';
             const tags = (r.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('');
-            return `<div class="chip">
-              <div class="nm">${who?`<span class="whopill">${esc(who)}</span>`:''}${esc(r.name)}${tags?`<div class="tags">${tags}</div>`:''}
+            /* tout le post-it ouvre la fiche ; « Pour qui ? » et × gardent leur action */
+            return `<div class="chip" data-act="openrec" data-id="${id}" role="button" aria-label="Voir la recette ${esc(r.name)}">
+              <div class="nm">${who?`<span class="whopill">${esc(who)}</span>`:''}${esc(r.name)}<span class="go" aria-hidden="true">›</span>${tags?`<div class="tags">${tags}</div>`:''}
                 <button class="whobtn${who?' set':''}" data-act="whofor" data-date="${key}" data-slot="${s.k}" data-id="${id}">${who?'Pour : '+esc(who):'＋ Pour qui ?'}</button>
               </div>
               <button class="x" data-act="unplan" data-date="${key}" data-slot="${s.k}" data-id="${id}" aria-label="Retirer">×</button>
@@ -1725,9 +1732,13 @@ function openSlotPicker(recipeId){
       const key = isoOf(d);
       /* créneaux où cette recette est déjà au menu */
       const done = SLOTS.filter(s => ((state.plan[key] || {})[s.k] || []).some(e => eidOf(e) === recipeId));
+      /* tous les plats déjà prévus ce jour-là (toutes recettes confondues) */
+      const dayNames = recipesOfDay(key).map(e => findRecipe(eidOf(e))).filter(Boolean).map(x => x.name);
+      const n = dayNames.length;
       return `<div class="card slotday${done.length ? ' has' : ''}" style="margin-bottom:9px;box-shadow:none">
         <div class="row" style="justify-content:space-between;margin-bottom:8px">
-          <b style="font-size:14.5px">${DAYS[(d.getDay()+6)%7]} ${fmtDate(d)}</b>
+          <span class="slotday-h"><b style="font-size:14.5px">${DAYS[(d.getDay()+6)%7]} ${fmtDate(d)}</b>
+            <span class="daycount${n ? '' : ' none'}" title="${esc(dayNames.join(', '))}">${n ? '🍽 ' + n + ' plat' + (n>1?'s':'') : 'rien de prévu'}</span></span>
           ${done.length ? `<span class="pill">✓ déjà prévue ${done.map(s=>s.l.toLowerCase()).join(' et ')}</span>` : ''}
         </div>
         <div class="row">
