@@ -201,6 +201,7 @@
   .chip[data-act]{cursor:pointer;transition:transform .08s, box-shadow .12s}
   .chip[data-act]:active{transform:scale(.985);box-shadow:none}
   .chip .go{display:inline-block;margin-left:6px;color:var(--accent);font-weight:800;font-size:17px;line-height:1}
+  .slotweek{font-family:var(--hand);font-size:23px;font-weight:700;color:var(--accent-deep);margin:14px 0 6px}
   .slotday-h{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;min-width:0}
   .daycount{font-size:12px;font-weight:800;color:var(--accent-deep);background:var(--accent-soft);border-radius:10px;padding:1px 8px;white-space:nowrap}
   .daycount.none{background:transparent;color:var(--ink-soft);font-weight:600;padding:0}
@@ -1719,23 +1720,31 @@ function openRecipeForm(id){
 
 /* ---- choisir un créneau pour planifier une recette ---- */
 function openSlotPicker(recipeId){
-  /* uniquement aujourd'hui et les jours à venir de la semaine affichée ;
-     si elle est entièrement passée, on propose la semaine en cours */
+  /* jamais de jour passé. Semaine future affichée : cette semaine-là en entier.
+     Sinon : la fin de la semaine en cours + toute la semaine suivante
+     (sans ça, un dimanche on ne pouvait plus choisir qu'un seul jour) */
   const today = new Date(); today.setHours(0,0,0,0);
-  const anchor = weekDates(ANCHOR)[6] < today ? today : ANCHOR;
-  const dates = weekDates(anchor).filter(d => !isPastKey(isoOf(d)));
-  const { week } = isoWeek(anchor);
+  const shown = weekDates(ANCHOR);
+  const dates = shown[0] > today
+    ? shown
+    : weekDates(today).concat(weekDates(addDays(today, 7))).filter(d => !isPastKey(isoOf(d)));
+  let lastWeek = null;
   openModal(`
     <h2>Planifier cette recette</h2>
-    <div class="muted" style="margin-bottom:12px">Semaine ${week} — choisis le jour et le moment.</div>
+    <div class="muted" style="margin-bottom:4px">Choisis le jour et le moment.</div>
     ${dates.map(d=>{
       const key = isoOf(d);
+      /* titre à chaque nouvelle semaine */
+      const w = isoWeek(d).week;
+      const head = w !== lastWeek
+        ? `<div class="slotweek">Semaine ${w}${w === isoWeek(today).week ? ' · cette semaine' : (w === isoWeek(addDays(today, 7)).week ? ' · semaine prochaine' : '')}</div>` : '';
+      lastWeek = w;
       /* créneaux où cette recette est déjà au menu */
       const done = SLOTS.filter(s => ((state.plan[key] || {})[s.k] || []).some(e => eidOf(e) === recipeId));
       /* tous les plats déjà prévus ce jour-là (toutes recettes confondues) */
       const dayNames = recipesOfDay(key).map(e => findRecipe(eidOf(e))).filter(Boolean).map(x => x.name);
       const n = dayNames.length;
-      return `<div class="card slotday${done.length ? ' has' : ''}" style="margin-bottom:9px;box-shadow:none">
+      return head + `<div class="card slotday${done.length ? ' has' : ''}" style="margin-bottom:9px;box-shadow:none">
         <div class="row" style="justify-content:space-between;margin-bottom:8px">
           <span class="slotday-h"><b style="font-size:14.5px">${DAYS[(d.getDay()+6)%7]} ${fmtDate(d)}</b>
             <span class="daycount${n ? '' : ' none'}" title="${esc(dayNames.join(', '))}">${n ? '🍽 ' + n + ' plat' + (n>1?'s':'') : 'rien de prévu'}</span></span>
