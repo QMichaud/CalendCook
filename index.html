@@ -141,21 +141,31 @@
   #weekDays.wk-back{transition:transform .2s ease, opacity .2s ease}
   #weekDays.wk-in{animation:wkIn .24s cubic-bezier(.2,.8,.3,1)}
   @keyframes wkIn{from{transform:translateX(var(--wk-from, 40px));opacity:.2}to{transform:none;opacity:1}}
-  #weekBar{
+  /* blocs du haut (semaines, recettes) : accrochés sous l'en-tête, cachés quand
+     on descend, rappelés dès qu'on remonte */
+  .stickybar{
     position:sticky;top:var(--hdr, 70px);z-index:15;
     transition:transform .22s ease, opacity .22s ease;
   }
   /* bleu clair « intercalaire » pour se détacher du papier blanc */
-  #weekBar{
+  .stickybar{
     background-color:#E3EBF8;
     border:1.5px solid rgba(47,93,168,.38);
     box-shadow:0 2px 0 rgba(47,93,168,.18), 0 4px 12px rgba(39,50,74,.10);
   }
-  #weekBar .btn.ghost,#weekBar .pill:not(.cloud){background:var(--sheet);border:1px solid rgba(47,93,168,.25)}
-  #weekBar .iconbtn{border-color:rgba(47,93,168,.3)}
+  .stickybar .btn.ghost,.stickybar .pill:not(.cloud){background:var(--sheet);border:1px solid rgba(47,93,168,.25)}
+  .stickybar .iconbtn{border-color:rgba(47,93,168,.3)}
   #weekBar .row{flex-wrap:wrap;row-gap:8px}          /* petits écrans : le compteur passe à la ligne */
-  #weekBar.stuck{box-shadow:0 2px 0 rgba(47,93,168,.18), 0 8px 20px rgba(39,50,74,.20)}
-  #weekBar.away{transform:translateY(calc(-100% - var(--hdr, 70px)));opacity:0;pointer-events:none}
+  .stickybar.stuck{box-shadow:0 2px 0 rgba(47,93,168,.18), 0 8px 20px rgba(39,50,74,.20)}
+  .stickybar.away{transform:translateY(calc(-100% - var(--hdr, 70px)));opacity:0;pointer-events:none}
+  #recBar .tagbox{margin-top:10px}
+  #recBar .tagpick{background:var(--sheet)}
+  #recBar .tagpick.on{background:var(--hl)}
+  .moretags{
+    display:block;margin:8px 0 0;padding:2px 0;border:0;background:none;cursor:pointer;
+    font-size:13px;font-weight:800;color:var(--accent);text-decoration:underline;text-underline-offset:3px;
+  }
+  .moretags[hidden]{display:none}
   .weeknav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px}
   .weeknav .lab{text-align:center;flex:1;min-width:0}
   .weeknav .lab b{display:block;font-family:var(--hand);font-size:30px;line-height:1;font-weight:700;color:var(--accent-deep)}
@@ -432,7 +442,7 @@
 
   <!-- ================= CALENDRIER ================= -->
   <section class="view on" id="v-cal">
-    <div class="card" id="weekBar">
+    <div class="card stickybar" id="weekBar">
       <div class="weeknav">
         <button class="iconbtn" id="prevW" aria-label="Semaine précédente">
           <svg viewBox="0 0 24 24"><polyline points="15 5 8 12 15 19"/></svg>
@@ -465,12 +475,15 @@
 
   <!-- ================= RECETTES ================= -->
   <section class="view" id="v-rec">
-    <button class="btn block" id="newRec" style="margin-bottom:14px">+ Nouvelle recette</button>
-    <div class="searchwrap">
-      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
-      <input type="search" id="qRec" placeholder="Rechercher une recette…">
+    <div class="card stickybar" id="recBar">
+      <button class="btn block" id="newRec" style="margin-bottom:10px">+ Nouvelle recette</button>
+      <div class="searchwrap" style="margin-bottom:0">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
+        <input type="search" id="qRec" placeholder="Rechercher une recette…">
+      </div>
+      <div class="tagbox" id="recTags"></div>
+      <button class="moretags" id="moreTags" hidden></button>
     </div>
-    <div class="tagbox" id="recTags" style="margin-bottom:14px"></div>
     <div class="rlist" id="recList"></div>
   </section>
 
@@ -1380,11 +1393,13 @@ const weekBar = {
   lastY: 0, travel: 0, quietUntil: 0, hdr: 70,
   measure(){ this.hdr = $('header.app').offsetHeight; document.documentElement.style.setProperty('--hdr', this.hdr + 'px'); },
   onScroll(){
-    const bar = $('#weekBar');
+    /* bloc du haut de l'onglet affiché (semaines, ou recherche des recettes) */
+    const view = $('.view.on'), bar = view && view.querySelector('.stickybar');
+    if(!bar) return;
     const y = Math.max(0, window.scrollY);            // ignore le rebond élastique d'iOS
     const dy = y - this.lastY; this.lastY = y;
     /* le bloc « colle » sous l'en-tête dès que sa place normale passe dessous */
-    const stuck = y > $('#v-cal').offsetTop - this.hdr + 1;
+    const stuck = y > view.offsetTop - this.hdr + 1;
     bar.classList.toggle('stuck', stuck);
     if(!stuck){ bar.classList.remove('away'); this.travel = 0; return; }
     if(Date.now() < this.quietUntil){ bar.classList.add('away'); return; }
@@ -1403,17 +1418,52 @@ addEventListener('scroll', ()=> weekBar.onScroll(), { passive:true });
 /* ============================================================
    RENDU — RECETTES
    ============================================================ */
+/* étiquettes limitées à 2 lignes ; au-delà, bouton « Voir toutes les étiquettes » */
+function clampTags(){
+  const box = $('#recTags'), more = $('#moreTags');
+  const chips = Array.from(box.children);
+  chips.forEach(c => c.hidden = false);
+  if(!$('#v-rec').classList.contains('on') || !chips.length){ more.hidden = true; return; }   // mesuré à l'affichage de l'onglet
+  const rows = Array.from(new Set(chips.map(c => c.offsetTop))).sort((a,b)=>a-b);
+  if(rows.length <= 2){ more.hidden = true; return; }
+  const hidden = chips.filter(c => c.offsetTop > rows[1]);
+  hidden.forEach(c => c.hidden = true);
+  more.textContent = 'Voir toutes les étiquettes (+' + hidden.length + ')';
+  more.hidden = false;
+}
+function openAllTags(){
+  const counts = {};
+  state.recipes.forEach(r => (r.tags||[]).forEach(t => counts[t] = (counts[t]||0)+1));
+  const tags = Object.keys(counts).sort((a,b)=>a.localeCompare(b,'fr'));
+  openModal(`
+    <h2>Étiquettes</h2>
+    ${tags.length > 12 ? `<div class="searchwrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
+      <input type="search" id="tagQ" placeholder="Chercher une étiquette…" autocomplete="off"></div>` : ''}
+    <div class="tagbox" id="allTags">
+      <button class="tagpick${filterTag===null?' on':''}" data-act="ftagall" data-tag="">Toutes (${state.recipes.length})</button>
+      ${tags.map(t=>`<button class="tagpick${filterTag===t?' on':''}" data-act="ftagall" data-tag="${esc(t)}">${esc(t)} <span class="cnt">${counts[t]}</span></button>`).join('')}
+    </div>
+    <div class="foot"><button class="btn ghost" data-act="closemodal">Fermer</button></div>
+  `);
+  if($('#tagQ')) $('#tagQ').addEventListener('input', ()=>{
+    const q = $('#tagQ').value.trim().toLowerCase();
+    $$('#allTags .tagpick').forEach(b => b.hidden = !!(q && b.dataset.tag && !b.dataset.tag.toLowerCase().includes(q)));
+  });
+}
 let filterTag = null;
 function renderRecipes(){
   const q = $('#qRec').value.trim().toLowerCase();
   // nuage d'étiquettes
   const counts = {};
   state.recipes.forEach(r => (r.tags||[]).forEach(t => counts[t] = (counts[t]||0)+1));
-  const tags = Object.keys(counts).sort((a,b)=>a.localeCompare(b,'fr'));
+  if(filterTag && !counts[filterTag]) filterTag = null;       // étiquette disparue
+  /* l'étiquette choisie passe en tête, pour rester visible même repliée */
+  const tags = Object.keys(counts).sort((a,b)=> (b===filterTag) - (a===filterTag) || a.localeCompare(b,'fr'));
   $('#recTags').innerHTML = tags.length
     ? `<button class="tagpick${filterTag===null?' on':''}" data-act="ftag" data-tag="">Toutes (${state.recipes.length})</button>` +
       tags.map(t=>`<button class="tagpick${filterTag===t?' on':''}" data-act="ftag" data-tag="${esc(t)}">${esc(t)} <span class="cnt">${counts[t]}</span></button>`).join('')
     : '';
+  clampTags();
 
   let list = state.recipes.slice().sort((a,b)=>a.name.localeCompare(b.name,'fr'));
   if(q) list = list.filter(r => r.name.toLowerCase().includes(q) || (r.ingredients||[]).some(i=>i.name.toLowerCase().includes(q)));
@@ -2051,6 +2101,7 @@ document.addEventListener('click', e=>{
     case 'adding': $('#ingWrap').insertAdjacentHTML('beforeend', ingredientRow()); break;
     case 'deling': t.closest('.ingline').remove(); break;
     case 'ftag': filterTag = t.dataset.tag || null; renderRecipes(); break;
+    case 'ftagall': filterTag = t.dataset.tag || null; closeModal(); renderRecipes(); window.scrollTo({ top:0 }); break;
     case 'closemodal': closeModal(); break;
     case 'ck': {
       const it = state.shopping.find(x=>x.id===id);
@@ -2099,6 +2150,7 @@ $$('nav.tabs button').forEach(b=>{
     b.classList.add('on');
     $$('.view').forEach(v=>v.classList.remove('on'));
     $('#v-' + b.dataset.v).classList.add('on');
+    if(b.dataset.v === 'rec') clampTags();         // les étiquettes se mesurent une fois l'onglet visible
     if(b.dataset.v === 'cal') scrollToToday();   // calendrier : directement sur le jour actuel
     else window.scrollTo({top:0});
   });
@@ -2218,6 +2270,8 @@ $('#weekToCart').addEventListener('click', ()=>{
 /* --- recettes --- */
 $('#newRec').addEventListener('click', ()=> openRecipeForm(null));
 $('#qRec').addEventListener('input', renderRecipes);
+$('#moreTags').addEventListener('click', openAllTags);
+addEventListener('resize', clampTags);
 
 /* --- courses --- */
 function addManual(){
