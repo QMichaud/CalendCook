@@ -234,18 +234,27 @@ end;
 $$;
 
 -- mes amis et mes demandes : etat = 'ami' | 'recue' | 'envoyee'
-create or replace function public.mes_amis()
-returns table (email text, etat text)
+-- foyers = les foyers que j'ai en commun avec cette personne (leurs recettes me sont déjà partagées)
+drop function if exists public.mes_amis();
+create function public.mes_amis()
+returns table (email text, etat text, foyers text[])
 language sql stable security definer set search_path = public
 as $$
-  select case when d.de = m.e then d.a else d.de end,
-         case when d.statut = 'accepte' then 'ami' when d.de = m.e then 'envoyee' else 'recue' end
-    from public.demandes_amis d, (select lower(auth.jwt() ->> 'email') as e) m
-   where m.e is not null and (d.de = m.e or d.a = m.e)
+  select x.autre, x.etat,
+         coalesce((select array_agg(f1.foyer_id order by f1.foyer_id)
+                     from public.foyer_membres f1
+                     join public.foyer_membres f2 on f2.foyer_id = f1.foyer_id
+                    where f1.email = x.moi and f2.email = x.autre), '{}')
+    from (select case when d.de = m.e then d.a else d.de end as autre,
+                 case when d.statut = 'accepte' then 'ami' when d.de = m.e then 'envoyee' else 'recue' end as etat,
+                 m.e as moi
+            from public.demandes_amis d, (select lower(auth.jwt() ->> 'email') as e) m
+           where m.e is not null and (d.de = m.e or d.a = m.e)) x
    order by 1;
 $$;
 
--- les recettes de mes amis (celles des foyers dont ils sont membres), sans rien d'autre
+-- les recettes de mes amis (celles des foyers dont ils sont membres), sans rien d'autre,
+-- hors foyers dont je suis moi-même membre (leurs recettes sont déjà les miennes)
 create or replace function public.recettes_amis()
 returns table (ami text, recette jsonb)
 language sql stable security definer set search_path = public
@@ -260,9 +269,12 @@ as $$
     from amis
     join public.foyer_membres fm on fm.email = amis.ami
     join public.recettes_app ra  on ra.id = fm.foyer_id
+    cross join m
     cross join lateral jsonb_array_elements(
       case when jsonb_typeof(ra.data -> 'recipes') = 'array' then ra.data -> 'recipes' else '[]'::jsonb end) r
    where r ->> 'id' is not null
+     and not exists (select 1 from public.foyer_membres moi
+                      where moi.foyer_id = fm.foyer_id and moi.email = m.e)
    order by amis.ami, r ->> 'id';
 $$;
 
