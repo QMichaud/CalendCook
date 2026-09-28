@@ -1246,14 +1246,17 @@ function paintFriends(){
   const by = k => friends.list.filter(f => f.etat === k);
   const recues = by('recue'), amis = by('ami'), env = by('envoyee');
   const box = rows => `<div class="card" style="padding:4px 12px;box-shadow:none;margin:0">${rows}</div>`;
+  // foyers en commun : leurs recettes sont déjà les miennes, elles n'apparaissent pas dans « Recettes d'amis »
+  const common = f => { const l = Array.isArray(f.foyers) ? f.foyers.map(String) : [];
+    return l.length ? `<small class="frhome">🏠 membre de ${l.length > 1 ? 'tes foyers' : 'ton foyer'} ${l.map(esc).join(', ')} · recettes déjà partagées</small>` : ''; };
   b.innerHTML = `
     ${recues.length ? `<label class="f">Demandes reçues</label>${box(recues.map(f => `
-      <div class="shopitem"><div class="txt">${esc(f.email)}<small>veut devenir ton ami·e</small></div>
+      <div class="shopitem"><div class="txt">${esc(f.email)}<small>veut devenir ton ami·e</small>${common(f)}</div>
         <span class="frbtns"><button class="btn sm" data-act="fraccept" data-email="${esc(f.email)}">Accepter</button>
         <button class="btn line sm" data-act="frrefuse" data-email="${esc(f.email)}">Refuser</button></span></div>`).join(''))}` : ''}
     <label class="f">Mes amis</label>
     ${amis.length ? box(amis.map(f => `
-      <div class="shopitem"><div class="txt">${esc(f.email)}</div>
+      <div class="shopitem"><div class="txt">${esc(f.email)}${common(f)}</div>
         <button class="x" data-act="frremove" data-kind="ami" data-email="${esc(f.email)}" aria-label="Retirer de mes amis">×</button></div>`).join(''))
       : '<div class="empty" style="padding:14px">Pas encore d’ami. Ajoute quelqu’un avec son adresse e-mail.</div>'}
     <label class="f">Ajouter un ami</label>
@@ -1264,7 +1267,7 @@ function paintFriends(){
     <div class="err" id="frErr"></div>
     <div class="muted">La personne verra ta demande dans l’app en se connectant avec cette adresse (aucun e-mail n’est envoyé).</div>
     ${env.length ? `<label class="f">Demandes envoyées</label>${box(env.map(f => `
-      <div class="shopitem"><div class="txt">${esc(f.email)}<small>en attente de réponse</small></div>
+      <div class="shopitem"><div class="txt">${esc(f.email)}<small>en attente de réponse</small>${common(f)}</div>
         <button class="btn line sm" data-act="frremove" data-kind="envoyee" data-email="${esc(f.email)}">Annuler</button></div>`).join(''))}` : ''}`;
   const send = async ()=>{
     const mail = $('#frEmail').value.trim().toLowerCase();
