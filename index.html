@@ -171,6 +171,7 @@
   .stickybar .btn.ghost,.stickybar .pill:not(.cloud){background:var(--sheet);border:1px solid rgba(47,93,168,.25)}
   .stickybar .iconbtn{border-color:rgba(47,93,168,.3)}
   #weekBar .row{flex-wrap:wrap;row-gap:8px}          /* petits écrans : le compteur passe à la ligne */
+  #wCount{margin-left:auto}
   .stickybar.stuck{box-shadow:0 2px 0 rgba(47,93,168,.18), 0 8px 20px rgba(39,50,74,.20)}
   .stickybar.away{transform:translateY(calc(-100% - var(--hdr, 70px)));opacity:0;pointer-events:none}
   #recBar .tagbox{margin-top:10px}
@@ -228,8 +229,7 @@
   .day.past .chip .nm{color:#646B7A}
   .slot-none{font-size:13px;color:#A8A294;padding:0 4px 4px}
   .day.past .addmini{background:transparent;color:#8A8F9C;border-color:#CFC8B8}
-  .day.past .whobtn,.day.past .tag{opacity:.75}
-  .day.past .whobtn{border-color:#CFC8B8}
+  .day.past .tag{opacity:.75}
   .day.past .slot-t{color:#9A8F8C}
 
   .slots{padding:8px 11px 6px}
@@ -385,16 +385,6 @@
   }
   .pill.cloud{background:#E4F1E6;color:#3F7049}
   .pill.local{background:#FBF0DD;color:#8E6A2E}
-  .whobtn{
-    width:100%;text-align:left;border:1.5px dashed var(--hl-line);background:transparent;
-    border-radius:4px;padding:4px 9px;font-size:11.5px;color:var(--ink-soft);font-weight:700;cursor:pointer;
-    margin-top:5px;
-  }
-  .whobtn.set{border-style:solid;border-color:rgba(47,93,168,.3);background:rgba(255,255,255,.6);color:var(--accent-deep)}
-  .whopill{
-    display:inline-block;font-size:10.5px;font-weight:800;background:var(--accent);color:#fff;
-    border-radius:3px;padding:1px 6px;margin-right:6px;vertical-align:1px;
-  }
   .acct{
     display:flex;align-items:center;gap:6px;flex:none;max-width:46%;
     border:1px solid var(--line);background:var(--sheet);border-radius:16px;
@@ -474,7 +464,6 @@
       <div class="row">
         <button class="btn ghost sm" id="todayBtn">Cette semaine</button>
         <button class="btn ghost sm" id="pickWeekBtn">Choisir</button>
-        <button class="btn ghost sm" id="eatersBtn">Pour qui ?</button>
         <button class="btn ghost sm" id="mealsBtn" aria-label="Repas affichés par défaut" title="Repas affichés">⚙</button>
         <span style="flex:1"></span>
         <span class="pill" id="wCount">0 plat</span>
@@ -1413,7 +1402,6 @@ function recipesOfWeek(anchor){
 function findRecipe(id){ return state.recipes.find(r => r.id === id); }
 /* un plat du plan est un id (ancien format) ou { id, who } */
 function eidOf(e){ return typeof e === 'string' ? e : (e && e.id); }
-function whoOf(e){ return (e && typeof e === 'object' && e.who) ? e.who : ''; }
 /* convertit les anciens plats (id nu, ou entrée sans id) au format { id, who } */
 function migrer(){
   let changed = false;
@@ -1439,14 +1427,6 @@ function migrer(){
     state.plan[k] = day;
   });
   if(changed) localStorage.setItem(LS, JSON.stringify(state));
-}
-/* liste des destinataires connus : profils enregistrés + saisies libres */
-function knownEaters(){
-  const used = new Set(state.eaters);
-  Object.keys(state.plan).forEach(k=>{
-    SLOTS.forEach(s => ((state.plan[k] || {})[s.k] || []).forEach(e=>{ const w = whoOf(e); if(w) used.add(w); }));
-  });
-  return Array.from(used).sort((a,b)=>a.localeCompare(b,'fr'));
 }
 
 /* ============================================================
@@ -1478,14 +1458,13 @@ function renderWeek(){
         <div class="slot">
           <div class="slot-t">${s.l}</div>
           ${list.map(entry=>{
-            const id = eidOf(entry), who = whoOf(entry);
+            const id = eidOf(entry);
             const r = findRecipe(id);
             if(!r) return '';
             const tags = (r.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('');
-            /* tout le post-it ouvre la fiche ; « Pour qui ? » et × gardent leur action */
+            /* tout le post-it ouvre la fiche ; × retire le plat */
             return `<div class="chip" data-act="openrec" data-id="${id}" role="button" aria-label="Voir la recette ${esc(r.name)}">
-              <div class="nm">${who?`<span class="whopill">${esc(who)}</span>`:''}${esc(r.name)}<span class="go" aria-hidden="true">›</span>${tags?`<div class="tags">${tags}</div>`:''}
-                <button class="whobtn${who?' set':''}" data-act="whofor" data-date="${key}" data-slot="${s.k}" data-id="${id}">${who?'Pour : '+esc(who):'＋ Pour qui ?'}</button>
+              <div class="nm">${esc(r.name)}<span class="go" aria-hidden="true">›</span>${tags?`<div class="tags">${tags}</div>`:''}
               </div>
               <button class="x" data-act="unplan" data-date="${key}" data-slot="${s.k}" data-id="${id}" aria-label="Retirer">×</button>
             </div>`;
@@ -2055,68 +2034,6 @@ function openMealSettings(){
   `);
 }
 
-/* ---- destinataire d'un plat (« pour qui ») ---- */
-function openWhofor(dateKey, slot, rid){
-  const entry = ((state.plan[dateKey]||{})[slot]||[]).find(e => eidOf(e) === rid);
-  const current = whoOf(entry);
-  const list = knownEaters();
-  openModal(`
-    <h2>Pour qui&nbsp;?</h2>
-    <div class="muted" style="margin-bottom:12px">Désigne le destinataire de ce plat — pratique pour savoir ce que tu cuisines pour toi ou pour ton enfant.</div>
-    <div class="tagbox" style="margin-bottom:14px">
-      <button class="tagpick${current===''?' on':''}" data-act="doplanfor" data-date="${dateKey}" data-slot="${slot}" data-id="${rid}" data-who="">Personne / commun</button>
-      ${list.map(n=>`<button class="tagpick${current===n?' on':''}" data-act="doplanfor" data-date="${dateKey}" data-slot="${slot}" data-id="${rid}" data-who="${esc(n)}">${esc(n)}</button>`).join('')}
-    </div>
-    <label class="f">Autre nom</label>
-    <div class="row">
-      <input type="text" id="whoFree" placeholder="Ex. Léo, les grands-parents…" value="${esc(current)}" style="flex:1">
-      <button class="btn sm" id="whoOk" style="flex:none">Valider</button>
-    </div>
-    <div class="foot"><button class="btn ghost" data-act="closemodal">Annuler</button></div>
-  `);
-  $('#whoOk').addEventListener('click', ()=>{
-    const v = $('#whoFree').value.trim();
-    if(v && !state.eaters.includes(v)) state.eaters.push(v);
-    applyWho(dateKey, slot, rid, v);
-  });
-  $('#whoFree').addEventListener('keydown', e=>{
-    if(e.key === 'Enter'){ e.preventDefault(); $('#whoOk').click(); }
-  });
-}
-function applyWho(dateKey, slot, rid, who){
-  const list = ((state.plan[dateKey]||{})[slot]||[]);
-  const pos = list.findIndex(e => eidOf(e) === rid);
-  if(pos >= 0) list[pos] = { id:rid, who };
-  store.save(); closeModal(); render(); toast('Destinataire mis à jour');
-}
-
-/* ---- gérer la liste des destinataires ---- */
-function openEaterForm(){
-  openModal(`
-    <h2>Pour qui je cuisine&nbsp;?</h2>
-    <div class="muted" style="margin-bottom:12px">Ces noms apparaissent en un tap quand tu attribues un plat. Tu peux aussi en saisir un à la volée depuis le calendrier.</div>
-    ${state.eaters.length ? state.eaters.map(n=>`
-      <div class="shopitem">
-        <div class="txt">${esc(n)}</div>
-        <button class="x" data-act="deleater" data-name="${esc(n)}" aria-label="Retirer">×</button>
-      </div>`).join('') : '<div class="empty" style="padding:16px">Aucun nom enregistré pour l’instant.</div>'}
-    <label class="f">Ajouter un nom</label>
-    <div class="row">
-      <input type="text" id="eaterNew" placeholder="Ex. Léo" style="flex:1">
-      <button class="btn sm" id="eaterOk" style="flex:none">Ajouter</button>
-    </div>
-    <div class="foot"><button class="btn ghost" data-act="closemodal">Fermer</button></div>
-  `);
-  const add = ()=>{
-    const v = $('#eaterNew').value.trim();
-    if(!v) return;
-    if(!state.eaters.includes(v)) state.eaters.push(v);
-    store.save(); render(); openEaterForm();
-  };
-  $('#eaterOk').addEventListener('click', add);
-  $('#eaterNew').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); add(); }});
-}
-
 /* ---- import courses ---- */
 function doImport(mode){
   const v = $('#impWeek').value; if(!v) return;
@@ -2238,7 +2155,6 @@ document.addEventListener('click', e=>{
     }
     case 'delitem': state.shopping = state.shopping.filter(x=>x.id!==id); store.save(); renderShop(); break;
     case 'import': doImport(t.dataset.mode); break;
-    case 'eater': openEaterForm(); break;
     case 'localonly': localStorage.setItem(LS_LOCALONLY,'1'); closeModal(); toast('Données gardées sur cet appareil'); break;
     case 'relogin': openLogin(t.dataset.email); break;
     case 'logout': closeMenu(); doLogout(); break;
@@ -2252,20 +2168,6 @@ document.addEventListener('click', e=>{
       db('foyer_membres?foyer_id=eq.' + encodeURIComponent(cloud.foyer) + '&email=eq.' + encodeURIComponent(mail), { method:'DELETE' })
         .then(()=>{ toast('Membre retiré'); openFoyer(); })
         .catch(err=>toast('Impossible : ' + err.message));
-      break;
-    }
-    case 'whofor': openWhofor(t.dataset.date, t.dataset.slot, id); break;
-    case 'deleater': state.eaters = state.eaters.filter(x=>x!==t.dataset.name); store.save(); render(); toast('Profil retiré'); break;
-    case 'doplanfor': {
-      const key = t.dataset.date, slot = t.dataset.slot, rid = t.dataset.id;
-      state.plan[key] = state.plan[key] || { midi:[], soir:[] };
-      state.plan[key][slot] = state.plan[key][slot] || [];
-      const pos = state.plan[key][slot].findIndex(e => eidOf(e) === rid);
-      if(pos >= 0){
-        const who = t.dataset.who || '';
-        state.plan[key][slot][pos] = Object.assign({}, state.plan[key][slot][pos], { who });
-      }
-      store.save(); closeModal(); render(); toast('Destinataire mis à jour');
       break;
     }
   }
@@ -2357,7 +2259,6 @@ $('#nextW2').addEventListener('click', ()=>{
   if($('#impWeek').querySelector(`option[value="${v}"]`)){ $('#impWeek').value = v; renderImport(); }
 });
 $('#todayBtn').addEventListener('click', ()=>{ ANCHOR = new Date(); ANCHOR.setHours(0,0,0,0); render(); scrollToToday(true); });
-$('#eatersBtn').addEventListener('click', openEaterForm);
 $('#mealsBtn').addEventListener('click', openMealSettings);
 $('#acctBtn').addEventListener('click', ()=> auth.session ? toggleMenu() : openLogin());
 
