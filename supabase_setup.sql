@@ -159,6 +159,124 @@ revoke execute on function public.recuperer_session(text)                  from 
 grant  execute on function public.deposer_session(text, text, text, bigint) to authenticated;
 grant  execute on function public.recuperer_session(text)                  to anon, authenticated;
 
+-- 6 ter) Amis : demandes par e-mail, acceptation, et partage des RECETTES uniquement
+--   La table n'est lisible par personne directement : tout passe par les
+--   fonctions ci-dessous, qui ne donnent accès qu'à ses propres demandes et,
+--   pour les amis acceptés, à la seule liste de leurs recettes (jamais leur
+--   calendrier ni leur liste de courses).
+create table if not exists public.demandes_amis (
+  de      text        not null check (de = lower(de)),
+  a       text        not null check (a = lower(a)),
+  statut  text        not null default 'attente' check (statut in ('attente', 'accepte')),
+  cree_le timestamptz not null default now(),
+  primary key (de, a),
+  check (de <> a)
+);
+alter table public.demandes_amis enable row level security;          -- aucune règle : illisible directement
+revoke all on public.demandes_amis from anon, authenticated;
+
+-- envoyer une demande (si l'autre m'en a déjà envoyé une : on devient amis directement)
+create or replace function public.demander_ami(email text)
+returns text
+language plpgsql security definer set search_path = public
+as $$
+declare
+  moi   text := lower(auth.jwt() ->> 'email');
+  cible text := lower(btrim(coalesce(email, '')));
+begin
+  if moi is null then raise exception 'Connexion requise'; end if;
+  if cible !~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$' then raise exception 'Adresse e-mail invalide'; end if;
+  if cible = moi then raise exception 'C''est ta propre adresse'; end if;
+  if exists (select 1 from public.demandes_amis d where d.statut = 'accepte'
+             and ((d.de = moi and d.a = cible) or (d.de = cible and d.a = moi))) then
+    return 'deja';
+  end if;
+  if exists (select 1 from public.demandes_amis d where d.de = cible and d.a = moi and d.statut = 'attente') then
+    update public.demandes_amis set statut = 'accepte' where de = cible and a = moi;
+    return 'accepte';
+  end if;
+  insert into public.demandes_amis (de, a) values (moi, cible) on conflict do nothing;
+  return 'envoyee';
+end;
+$$;
+
+-- accepter ou refuser une demande reçue
+create or replace function public.repondre_ami(email text, accepter boolean)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare
+  moi text := lower(auth.jwt() ->> 'email');
+  de_ text := lower(btrim(coalesce(email, '')));
+begin
+  if moi is null then raise exception 'Connexion requise'; end if;
+  if accepter then
+    update public.demandes_amis set statut = 'accepte' where de = de_ and a = moi and statut = 'attente';
+  else
+    delete from public.demandes_amis where de = de_ and a = moi and statut = 'attente';
+  end if;
+  if not found then raise exception 'Demande introuvable'; end if;
+end;
+$$;
+
+-- retirer un ami, ou annuler une demande envoyée
+create or replace function public.retirer_ami(email text)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare
+  moi   text := lower(auth.jwt() ->> 'email');
+  autre text := lower(btrim(coalesce(email, '')));
+begin
+  if moi is null then raise exception 'Connexion requise'; end if;
+  delete from public.demandes_amis where (de = moi and a = autre) or (de = autre and a = moi);
+end;
+$$;
+
+-- mes amis et mes demandes : etat = 'ami' | 'recue' | 'envoyee'
+create or replace function public.mes_amis()
+returns table (email text, etat text)
+language sql stable security definer set search_path = public
+as $$
+  select case when d.de = m.e then d.a else d.de end,
+         case when d.statut = 'accepte' then 'ami' when d.de = m.e then 'envoyee' else 'recue' end
+    from public.demandes_amis d, (select lower(auth.jwt() ->> 'email') as e) m
+   where m.e is not null and (d.de = m.e or d.a = m.e)
+   order by 1;
+$$;
+
+-- les recettes de mes amis (celles des foyers dont ils sont membres), sans rien d'autre
+create or replace function public.recettes_amis()
+returns table (ami text, recette jsonb)
+language sql stable security definer set search_path = public
+as $$
+  with m as (select lower(auth.jwt() ->> 'email') as e),
+  amis as (
+    select case when d.de = m.e then d.a else d.de end as ami
+      from public.demandes_amis d, m
+     where m.e is not null and d.statut = 'accepte' and (d.de = m.e or d.a = m.e)
+  )
+  select distinct on (amis.ami, r ->> 'id') amis.ami, r
+    from amis
+    join public.foyer_membres fm on fm.email = amis.ami
+    join public.recettes_app ra  on ra.id = fm.foyer_id
+    cross join lateral jsonb_array_elements(
+      case when jsonb_typeof(ra.data -> 'recipes') = 'array' then ra.data -> 'recipes' else '[]'::jsonb end) r
+   where r ->> 'id' is not null
+   order by amis.ami, r ->> 'id';
+$$;
+
+revoke execute on function public.demander_ami(text)          from anon, public;
+revoke execute on function public.repondre_ami(text, boolean) from anon, public;
+revoke execute on function public.retirer_ami(text)           from anon, public;
+revoke execute on function public.mes_amis()                  from anon, public;
+revoke execute on function public.recettes_amis()             from anon, public;
+grant  execute on function public.demander_ami(text)          to authenticated;
+grant  execute on function public.repondre_ami(text, boolean) to authenticated;
+grant  execute on function public.retirer_ami(text)           to authenticated;
+grant  execute on function public.mes_amis()                  to authenticated;
+grant  execute on function public.recettes_amis()             to authenticated;
+
 -- 7) Recharge le cache de l'API pour que l'app voie tout de suite les fonctions
 notify pgrst, 'reload schema';
 
