@@ -172,6 +172,23 @@
   .stickybar .iconbtn{border-color:rgba(47,93,168,.3)}
   #weekBar .row{flex-wrap:wrap;row-gap:8px}          /* petits écrans : le compteur passe à la ligne */
   #wCount{margin-left:auto}
+  /* roue des réglages : juste le dessin, tracé à l'encre comme le reste */
+  .gearbtn{
+    width:38px;height:38px;flex:none;border:0;background:none;padding:0;cursor:pointer;
+    display:inline-flex;align-items:center;justify-content:center;border-radius:50%;
+  }
+  .gearbtn svg{width:26px;height:26px;fill:rgba(255,253,248,.7);stroke:var(--accent-deep);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;transition:transform .3s}
+  .gearbtn:active svg{transform:rotate(60deg)}
+  /* volet repliable (import depuis le calendrier) */
+  details.fold > summary{list-style:none;display:flex;align-items:center;gap:10px;cursor:pointer}
+  details.fold > summary::-webkit-details-marker{display:none}
+  details.fold .fold-t{flex:1;min-width:0;display:flex;flex-direction:column}
+  details.fold .fold-t h2.sec{margin-bottom:2px;align-self:flex-start}
+  details.fold .fold-i svg{width:22px;height:22px;stroke:var(--accent);fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;transition:transform .2s}
+  details.fold[open] .fold-i svg{transform:rotate(180deg)}
+  details.fold[open] > summary{margin-bottom:4px}
+  .tagpick.imprec{background:var(--sheet);color:var(--ink-soft);text-decoration:line-through;text-decoration-color:rgba(107,115,134,.6)}
+  .tagpick.imprec.on{background:var(--hl-soft);border-color:var(--hl-line);color:var(--ink);text-decoration:none}
   .stickybar.stuck{box-shadow:0 2px 0 rgba(47,93,168,.18), 0 8px 20px rgba(39,50,74,.20)}
   .stickybar.away{transform:translateY(calc(-100% - var(--hdr, 70px)));opacity:0;pointer-events:none}
   #recBar .tagbox{margin-top:10px}
@@ -464,7 +481,9 @@
       <div class="row">
         <button class="btn ghost sm" id="todayBtn">Cette semaine</button>
         <button class="btn ghost sm" id="pickWeekBtn">Choisir</button>
-        <button class="btn ghost sm" id="mealsBtn" aria-label="Repas affichés par défaut" title="Repas affichés">⚙</button>
+        <button class="gearbtn" id="mealsBtn" aria-label="Repas affichés par défaut" title="Repas affichés">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </button>
         <span style="flex:1"></span>
         <span class="pill" id="wCount">0 plat</span>
       </div>
@@ -501,8 +520,12 @@
       </div>
     </div>
 
-    <div class="card">
-      <h2 class="sec">Import depuis le calendrier</h2>
+    <details class="card fold" id="impFold">
+      <summary>
+        <span class="fold-t"><h2 class="sec">Import depuis le calendrier</h2>
+          <span class="muted">Ajouter les ingrédients des recettes d’une semaine</span></span>
+        <span class="fold-i" aria-hidden="true"><svg viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg></span>
+      </summary>
       <label class="f">Semaine</label>
       <div class="row">
         <button class="iconbtn" id="prevW2" aria-label="Semaine précédente">
@@ -514,7 +537,7 @@
         </button>
       </div>
       <div id="impPreview" style="margin-top:12px"></div>
-    </div>
+    </details>
 
     <div class="card">
       <div class="row" style="justify-content:space-between;margin-bottom:6px">
@@ -1630,13 +1653,16 @@ function renderWeekSelect(force){
   sel.value = year + '-' + week;
 }
 /* recettes (uniques) et ingrédients regroupés d'une semaine ISO */
+/* recettes décochées dans l'import (remises à zéro quand on change de semaine) */
+const impOff = new Set(); let impWeekKey = '';
 function weekIngredients(y, w){
   const mon = mondayOfWeek(y,w);
   const dates = DAYS.map((_,i)=> addDays(mon,i));
   const ids = dates.flatMap(d => recipesOfDay(isoOf(d)).map(eidOf));
   const recipes = Array.from(new Set(ids)).map(findRecipe).filter(Boolean);
+  const chosen = recipes.filter(r => !impOff.has(r.id));
   const groups = {};
-  recipes.forEach(r => (r.ingredients||[]).forEach(i=>{
+  chosen.forEach(r => (r.ingredients||[]).forEach(i=>{
     const unit = i.unit || '';
     const k = i.name.trim().toLowerCase() + '|' + unit;     // 200 g et 1 botte ne s'additionnent pas
     if(!groups[k]) groups[k] = { name:i.name.trim(), qty:0, unit, src:new Set() };
@@ -1644,26 +1670,28 @@ function weekIngredients(y, w){
     groups[k].src.add(r.name);
   }));
   const keys = Object.keys(groups).sort((a,b)=>a.localeCompare(b,'fr'));
-  return { recipes, groups, keys };
+  return { recipes, chosen, groups, keys };
 }
 function renderImport(){
   const v = $('#impWeek').value; if(!v) return;
+  if(v !== impWeekKey){ impOff.clear(); impWeekKey = v; }
   const [y,w] = v.split('-').map(Number);
-  const { recipes:uniq, groups, keys } = weekIngredients(y, w);
+  const { recipes:uniq, chosen, groups, keys } = weekIngredients(y, w);
 
   if(!uniq.length){
     $('#impPreview').innerHTML = `<div class="empty" style="padding:16px">Aucune recette programmée cette semaine-là.</div>`;
     return;
   }
   $('#impPreview').innerHTML = `
-    <div class="muted" style="margin-bottom:8px">${uniq.length} recette${uniq.length>1?'s':''} · ${keys.length} produit${keys.length>1?'s':''}</div>
-    <div style="margin-bottom:10px">${uniq.map(r=>`<span class="tag" style="margin:0 4px 4px 0">${esc(r.name)}</span>`).join('')}</div>
-    <div style="max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:12px;padding:4px 10px;background:var(--sheet)">
+    <div class="muted" style="margin-bottom:8px">${chosen.length}/${uniq.length} recette${uniq.length>1?'s':''} · ${keys.length} produit${keys.length>1?'s':''} — touche une recette pour l’inclure ou l’exclure</div>
+    <div class="tagbox" style="margin:0 0 10px">${uniq.map(r=>{ const on = !impOff.has(r.id);
+      return `<button class="tagpick imprec${on?' on':''}" data-act="imptoggle" data-id="${r.id}" aria-pressed="${on}">${on?'✓ ':''}${esc(r.name)}</button>`; }).join('')}</div>
+    ${keys.length ? `<div style="max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:12px;padding:4px 10px;background:var(--sheet)">
       ${keys.map(k=>`<div class="ingrow"><span style="flex:1">${esc(groups[k].name)}</span><span class="q">${esc(qtyLabel(groups[k].qty, groups[k].unit))}</span></div>`).join('')}
-    </div>
+    </div>` : `<div class="empty" style="padding:14px">${chosen.length ? 'Ces recettes n’ont pas d’ingrédients renseignés.' : 'Aucune recette sélectionnée.'}</div>`}
     <div class="row" style="margin-top:12px;gap:8px">
-      <button class="btn sm" style="flex:1" data-act="import" data-mode="add">Ajouter à ma liste</button>
-      <button class="btn ghost sm" style="flex:1" data-act="import" data-mode="replace">Remplacer</button>
+      <button class="btn sm" style="flex:1" data-act="import" data-mode="add"${keys.length?'':' disabled'}>Ajouter à ma liste</button>
+      <button class="btn ghost sm" style="flex:1" data-act="import" data-mode="replace"${keys.length?'':' disabled'}>Remplacer</button>
     </div>`;
 }
 
@@ -2038,8 +2066,8 @@ function openMealSettings(){
 function doImport(mode){
   const v = $('#impWeek').value; if(!v) return;
   const [y,w] = v.split('-').map(Number);
-  const { recipes, groups, keys } = weekIngredients(y, w);
-  if(!recipes.length){ toast('Aucune recette cette semaine-là'); return; }
+  const { chosen, groups, keys } = weekIngredients(y, w);
+  if(!chosen.length || !keys.length){ toast('Aucun ingrédient à importer'); return; }
 
   const items = keys.map(k=>({
     id: uid(),
@@ -2155,6 +2183,7 @@ document.addEventListener('click', e=>{
     }
     case 'delitem': state.shopping = state.shopping.filter(x=>x.id!==id); store.save(); renderShop(); break;
     case 'import': doImport(t.dataset.mode); break;
+    case 'imptoggle': impOff.has(id) ? impOff.delete(id) : impOff.add(id); renderImport(); break;
     case 'localonly': localStorage.setItem(LS_LOCALONLY,'1'); closeModal(); toast('Données gardées sur cet appareil'); break;
     case 'relogin': openLogin(t.dataset.email); break;
     case 'logout': closeMenu(); doLogout(); break;
@@ -2292,6 +2321,7 @@ $('#weekToCart').addEventListener('click', ()=>{
   document.querySelector('nav.tabs button[data-v="shop"]').classList.add('on');
   $$('.view').forEach(v=>v.classList.remove('on'));
   $('#v-shop').classList.add('on');
+  $('#impFold').open = true;                     // on vient pour importer : volet déplié
   renderWeekSelect(true); renderImport();
   window.scrollTo({top:0});
 });
