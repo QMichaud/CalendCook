@@ -379,6 +379,11 @@
   .shopitem .txt small{display:block;font-size:11.5px;color:var(--ink-soft);font-weight:400}
   .shopitem.done .txt{text-decoration:line-through;text-decoration-color:var(--red);text-decoration-thickness:2px;color:var(--ink-soft)}
   .ingrow{display:flex;gap:9px;padding:7px 4px;border-bottom:1px dashed var(--line);font-size:14px}
+  .steps{list-style:none;margin:0;padding:0;counter-reset:st}
+  .steps li{counter-increment:st;display:flex;gap:10px;padding:8px 4px;border-bottom:1px dashed var(--line);font-size:14.5px;line-height:1.45;overflow-wrap:anywhere}
+  .steps li::before{content:counter(st);flex:none;width:24px;height:24px;border-radius:50%;background:var(--accent-soft);color:var(--accent);
+    font-weight:800;font-size:13px;display:flex;align-items:center;justify-content:center;margin-top:-1px}
+  #rSteps{min-height:110px;resize:vertical;line-height:1.45}
   .ingrow:last-child{border-bottom:0}
   .ingrow .q{font-weight:800;color:var(--accent-deep);white-space:nowrap}
 
@@ -1360,7 +1365,7 @@ function cleanFriendRecipe(r, ami){
     id:uid(), name:String(r.name).slice(0, 200), duration: Number(r.duration) > 0 ? Math.round(Number(r.duration)) : 30,
     servings: Number(r.servings) > 0 ? Math.round(Number(r.servings)) : null, url: safeUrl(r.url) || '',
     tags: (Array.isArray(r.tags) ? r.tags : []).map(t => String(t).slice(0, 40)).filter(Boolean),
-    ingredients: ings, origin: { email:ami, id:String(r.id) }
+    ingredients: ings, steps: typeof r.steps === 'string' ? r.steps.slice(0, 20000) : '', origin: { email:ami, id:String(r.id) }
   };
 }
 function openFriendRecipe(i){
@@ -1380,6 +1385,7 @@ function openFriendRecipe(i){
       <span class="reclink-i">🔗</span><span class="reclink-t"><b>Voir la recette en ligne</b><small>${esc(siteOf(safeUrl(r.url)))}</small></span><span class="reclink-a">↗</span></a>` : ''}
     <h2 class="sec">Ingrédients${Number(r.servings) > 0 ? ' <small class="sec-sub">pour ' + Number(r.servings) + '</small>' : ''}</h2>
     ${ing || '<div class="muted">Aucun ingrédient renseigné.</div>'}
+    ${stepsHtml(typeof r.steps === 'string' ? r.steps : '')}
     <div class="foot">
       <button class="btn ghost" style="flex:1" data-act="frback">‹ Retour</button>
       ${done ? '<button class="btn" style="flex:1" disabled>✓ Déjà dans mes recettes</button>'
@@ -2040,6 +2046,12 @@ function safeUrl(v){
 const siteOf = url => { try{ return new URL(url).hostname.replace(/^www\./, ''); }catch(e){ return url; } };
 
 /* ---- fiches recette ---- */
+/* préparation : une étape par ligne ; numéros ou tirets tapés à la main retirés (la liste numérote déjà) */
+const stepList = t => String(t || '').split(/\r?\n/)
+  .map(l => l.trim().replace(/^(?:(?:étape\s*)?\d+\s*[.)/:-]|[-•*])\s*/i, '').trim()).filter(Boolean)
+  .map(l => l.charAt(0).toUpperCase() + l.slice(1));
+const stepsHtml = t => { const l = stepList(t);
+  return l.length ? `<h2 class="sec">Préparation</h2><ol class="steps">${l.map(x => `<li><span>${esc(x)}</span></li>`).join('')}</ol>` : ''; };
 function openRecipe(id){
   const r = findRecipe(id); if(!r) return;
   const ing = (r.ingredients||[]).map(i=>`<div class="ingrow"><span style="flex:1">${esc(i.name)}</span><span class="q">${esc(qtyLabel(i.qty,i.unit))}</span></div>`).join('');
@@ -2055,6 +2067,7 @@ function openRecipe(id){
       <span class="reclink-i">🔗</span><span class="reclink-t"><b>Voir la recette en ligne</b><small>${esc(siteOf(safeUrl(r.url)))}</small></span><span class="reclink-a">↗</span></a>` : ''}
     <h2 class="sec">Ingrédients${r.servings ? ' <small class="sec-sub">pour ' + r.servings + '</small>' : ''}</h2>
     ${ing || '<div class="muted">Aucun ingrédient renseigné.</div>'}
+    ${stepsHtml(r.steps)}
     <div class="foot">
       <button class="btn ghost" style="flex:1" data-act="editrec" data-id="${r.id}">Modifier</button>
       <button class="btn" style="flex:1" data-act="planfrom" data-id="${r.id}">Planifier</button>
@@ -2119,6 +2132,10 @@ function openRecipeForm(id, opts = {}){
       </div>
       <button type="button" class="btn ghost block" style="margin-top:8px" data-act="adding">+ Ajouter une ligne</button>
 
+      <label class="f">Préparation <span class="opt">(facultatif)</span></label>
+      <textarea id="rSteps" rows="5" placeholder="Une étape par ligne :&#10;Préchauffer le four à 180 °C&#10;Éplucher et couper les pommes&#10;…">${r&&r.steps?esc(r.steps):''}</textarea>
+      <div class="muted" style="margin-top:5px">Va à la ligne pour chaque nouvelle étape : elles seront numérotées automatiquement.</div>
+
       <label class="f">Lien de la recette <span class="opt">(facultatif)</span></label>
       <input type="text" id="rUrl" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" value="${r&&r.url?esc(r.url):''}" placeholder="https://www.marmiton.org/…">
       <div class="err" id="rUrlErr" style="min-height:0"></div>
@@ -2174,11 +2191,12 @@ function openRecipeForm(id, opts = {}){
     }).filter(Boolean);
     const tags = $('#rTags').value.split(',').map(t=>t.trim()).filter(Boolean);
     const uniqTags = Array.from(new Set(tags));
+    const steps = $('#rSteps').value.replace(/\s+$/, '');
 
     if(r){
-      Object.assign(r, { name, duration, servings, url, ingredients, tags:uniqTags });
+      Object.assign(r, { name, duration, servings, url, ingredients, steps, tags:uniqTags });
     } else {
-      state.recipes.push({ id:uid(), name, duration, servings, url, ingredients, tags:uniqTags });
+      state.recipes.push({ id:uid(), name, duration, servings, url, ingredients, steps, tags:uniqTags });
     }
     /* créée depuis « + Ajouter une recette » du calendrier : on la met au menu */
     const to = !r && opts.plan;
