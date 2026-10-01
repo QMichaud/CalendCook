@@ -1310,6 +1310,27 @@ async function friendAction(t){
 let frCache = null;                            // [{ ami, r }] : recettes reçues du serveur
 const frFilter = { q:'', who:'' };
 const importedFrom = (ami, id) => state.recipes.some(x => x.origin && x.origin.email === ami && x.origin.id === id);
+/* empreinte du contenu d'une recette (mêmes normalisations que le formulaire) :
+   sert à savoir si un ami a modifié la recette qu'il a importée */
+const recSig = r => JSON.stringify([String(r.name || '').trim(), Number(r.duration) || 0, Number(r.servings) || 0, String(r.url || ''),
+  (Array.isArray(r.ingredients) ? r.ingredients : []).filter(i => i && i.name)
+    .map(i => [String(i.name).trim(), Number(i.qty) > 0 ? Number(i.qty) : 0, String(i.unit || '')]),
+  String(r.steps || '').replace(/\s+$/, ''),
+  Array.from(new Set((Array.isArray(r.tags) ? r.tags : []).map(t => String(t).trim()).filter(Boolean)))]);
+/* recette d'origine d'une copie, même après plusieurs imports successifs (moi → A → B) */
+const rootOf = r => r.origin && typeof r.origin === 'object' ? String(r.origin.root || r.origin.id || '') : String(r.id || '');
+/* une copie qu'un ami a faite d'une recette que j'ai déjà (la mienne, ou une que j'ai importée)
+   ou dont l'original est déjà dans la liste de mes amis : masquée, sauf s'il l'a modifiée depuis son import */
+function friendCopyState(r){
+  if(!r.origin || typeof r.origin !== 'object') return '';
+  const root = rootOf(r);
+  const mine = state.recipes.find(x => x.id === root);
+  const orig = mine || (frCache || []).map(x => x.r).find(x => x !== r && String(x.id) === root && !x.origin);
+  if(!orig && !state.recipes.some(x => x.origin && rootOf(x) === root)) return '';
+  const changed = typeof r.origin.sig === 'string' ? recSig(r) !== r.origin.sig
+                : orig ? recSig(r) !== recSig(orig) : false;    // copie faite avant l'empreinte : comparée à l'original
+  return changed ? (mine ? 'mine-changed' : 'changed') : 'hide';
+}
 async function openFriendRecipes(){
   openModal(`
     <h2>Recettes d’amis</h2>
@@ -1332,7 +1353,8 @@ async function openFriendRecipes(){
     }catch(e){ if($('#frList')) $('#frList').innerHTML = `<div class="err">${esc(foyerErrMsg(e))}</div>`; return; }
   }
   if(!$('#frList')) return;                    // fenêtre fermée pendant le chargement
-  const amis = Array.from(new Set(frCache.map(x => x.ami))).sort();
+  const shown = frCache.map((x, i) => Object.assign({ i, copy:friendCopyState(x.r) }, x)).filter(x => x.copy !== 'hide');
+  const amis = Array.from(new Set(shown.map(x => x.ami))).sort();
   $('#frWho').innerHTML = '<option value="">👥 Tous</option>' + amis.map(a => `<option value="${esc(a)}">${esc(a)}</option>`).join('');
   $('#frWho').value = amis.includes(frFilter.who) ? frFilter.who : '';
   const paint = ()=>{
@@ -1340,13 +1362,14 @@ async function openFriendRecipes(){
     const q = ingKey(frFilter.q);
     const hit = r => !q || [r.name, ...(Array.isArray(r.ingredients) ? r.ingredients.map(i => i && i.name) : []), ...(Array.isArray(r.tags) ? r.tags : [])]
       .some(v => ingKey(v).includes(q));
-    const list = frCache.map((x, i) => Object.assign({ i }, x)).filter(x => (!frFilter.who || x.ami === frFilter.who) && hit(x.r));
-    $('#frList').innerHTML = !frCache.length
-      ? `<div class="empty">${friends.list.some(f => f.etat === 'ami') ? 'Tes amis n’ont pas encore de recettes.' : 'Tu n’as pas encore d’amis.<br><span class="muted">Ajoute-en depuis le menu en haut à droite (👥 Amis).</span>'}</div>`
+    const list = shown.filter(x => (!frFilter.who || x.ami === frFilter.who) && hit(x.r));
+    $('#frList').innerHTML = !shown.length
+      ? `<div class="empty">${friends.list.some(f => f.etat === 'ami') ? (frCache.length ? 'Tes amis n’ont pas d’autres recettes que les tiennes.' : 'Tes amis n’ont pas encore de recettes.') : 'Tu n’as pas encore d’amis.<br><span class="muted">Ajoute-en depuis le menu en haut à droite (👥 Amis).</span>'}</div>`
       : !list.length ? '<div class="empty">Aucune recette ne correspond.</div>'
       : list.map(x => `<div class="rec" style="margin-bottom:8px" data-act="frrec" data-i="${x.i}">
           <h3>${esc(x.r.name)}</h3>
           <div class="meta"><span>👤 ${esc(x.ami)}</span>${Number(x.r.duration) > 0 ? `<span>⏱ ${Number(x.r.duration)} min</span>` : ''}
+            ${x.copy === 'mine-changed' ? '<span class="pill">✏️ ta recette, modifiée</span>' : x.copy === 'changed' ? '<span class="pill">✏️ version modifiée</span>' : ''}
             ${importedFrom(x.ami, x.r.id) ? '<span class="pill">✓ déjà importée</span>' : ''}</div>
           ${Array.isArray(x.r.tags) && x.r.tags.length ? `<div class="tags" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px">${x.r.tags.map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}
         </div>`).join('');
@@ -1361,12 +1384,14 @@ function cleanFriendRecipe(r, ami){
     name:String(i.name).slice(0, 120), qty: Number(i.qty) > 0 ? Number(i.qty) : '',
     unit: UNITS.some(u => u.k === i.unit) ? i.unit : ''
   }));
-  return {
+  const c = {
     id:uid(), name:String(r.name).slice(0, 200), duration: Number(r.duration) > 0 ? Math.round(Number(r.duration)) : 30,
     servings: Number(r.servings) > 0 ? Math.round(Number(r.servings)) : null, url: safeUrl(r.url) || '',
     tags: (Array.isArray(r.tags) ? r.tags : []).map(t => String(t).slice(0, 40)).filter(Boolean),
-    ingredients: ings, steps: typeof r.steps === 'string' ? r.steps.slice(0, 20000) : '', origin: { email:ami, id:String(r.id) }
+    ingredients: ings, steps: typeof r.steps === 'string' ? r.steps.slice(0, 20000) : '', origin: { email:ami, id:String(r.id), root: rootOf(r).slice(0, 100) }
   };
+  c.origin.sig = recSig(c);                    // pour reconnaître plus tard une copie modifiée
+  return c;
 }
 function openFriendRecipe(i){
   const x = frCache && frCache[i]; if(!x) return;
@@ -1375,7 +1400,7 @@ function openFriendRecipe(i){
     .map(i => `<div class="ingrow"><span style="flex:1">${esc(i.name)}</span><span class="q">${esc(qtyLabel(Number(i.qty) > 0 ? Number(i.qty) : '', UNITS.some(u => u.k === i.unit) ? i.unit : ''))}</span></div>`).join('');
   openModal(`
     <h2>${esc(r.name)}</h2>
-    <div class="origin">👤 Recette de <b>${esc(x.ami)}</b></div>
+    <div class="origin">👤 Recette de <b>${esc(x.ami)}</b>${{ 'mine-changed':' · version modifiée de ta recette', changed:' · version modifiée' }[friendCopyState(r)] || ''}</div>
     <div class="row" style="gap:8px;margin-bottom:12px;flex-wrap:wrap">
       ${Number(r.duration) > 0 ? `<span class="pill">⏱ ${Number(r.duration)} min</span>` : ''}
       ${Number(r.servings) > 0 ? `<span class="pill">👥 ${Number(r.servings)} personne${Number(r.servings)>1?'s':''}</span>` : ''}
