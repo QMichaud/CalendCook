@@ -1311,12 +1311,17 @@ let frCache = null;                            // [{ ami, r }] : recettes reçue
 const frFilter = { q:'', who:'' };
 const importedFrom = (ami, id) => state.recipes.some(x => x.origin && x.origin.email === ami && x.origin.id === id);
 /* empreinte du contenu d'une recette (mêmes normalisations que le formulaire) :
-   sert à savoir si un ami a modifié la recette qu'il a importée */
-const recSig = r => JSON.stringify([String(r.name || '').trim(), Number(r.duration) || 0, Number(r.servings) || 0, String(r.url || ''),
+   sert à savoir si un ami a modifié la recette qu'il a importée.
+   Les étiquettes sont propres à chacun : elles ne font pas partie de la recette */
+const sigParts = r => [String(r.name || '').trim(), Number(r.duration) || 0, Number(r.servings) || 0, String(r.url || ''),
   (Array.isArray(r.ingredients) ? r.ingredients : []).filter(i => i && i.name)
     .map(i => [String(i.name).trim(), Number(i.qty) > 0 ? Number(i.qty) : 0, String(i.unit || '')]),
-  String(r.steps || '').replace(/\s+$/, ''),
-  Array.from(new Set((Array.isArray(r.tags) ? r.tags : []).map(t => String(t).trim()).filter(Boolean)))]);
+  String(r.steps || '').replace(/\s+$/, '')];
+const recSig = r => 'v2:' + JSON.stringify(sigParts(r));
+/* empreintes des premiers imports (sans préfixe) : elles comptaient encore les étiquettes */
+const recSigV1 = r => JSON.stringify(sigParts(r).concat([
+  Array.from(new Set((Array.isArray(r.tags) ? r.tags : []).map(t => String(t).trim()).filter(Boolean)))]));
+const sigChanged = (r, sig) => sig.startsWith('v2:') ? recSig(r) !== sig : recSigV1(r) !== sig;
 /* recette d'origine d'une copie, même après plusieurs imports successifs (moi → A → B) */
 const rootOf = r => r.origin && typeof r.origin === 'object' ? String(r.origin.root || r.origin.id || '') : String(r.id || '');
 /* une copie qu'un ami a faite d'une recette que j'ai déjà (la mienne, ou une que j'ai importée)
@@ -1327,7 +1332,7 @@ function friendCopyState(r){
   const mine = state.recipes.find(x => x.id === root);
   const orig = mine || (frCache || []).map(x => x.r).find(x => x !== r && String(x.id) === root && !x.origin);
   if(!orig && !state.recipes.some(x => x.origin && rootOf(x) === root)) return '';
-  const changed = typeof r.origin.sig === 'string' ? recSig(r) !== r.origin.sig
+  const changed = typeof r.origin.sig === 'string' ? sigChanged(r, r.origin.sig)
                 : orig ? recSig(r) !== recSig(orig) : false;    // copie faite avant l'empreinte : comparée à l'original
   return changed ? (mine ? 'mine-changed' : 'changed') : 'hide';
 }
@@ -1360,7 +1365,7 @@ async function openFriendRecipes(){
   const paint = ()=>{
     frFilter.q = $('#frQ').value; frFilter.who = $('#frWho').value;
     const q = ingKey(frFilter.q);
-    const hit = r => !q || [r.name, ...(Array.isArray(r.ingredients) ? r.ingredients.map(i => i && i.name) : []), ...(Array.isArray(r.tags) ? r.tags : [])]
+    const hit = r => !q || [r.name, ...(Array.isArray(r.ingredients) ? r.ingredients.map(i => i && i.name) : [])]
       .some(v => ingKey(v).includes(q));
     const list = shown.filter(x => (!frFilter.who || x.ami === frFilter.who) && hit(x.r));
     $('#frList').innerHTML = !shown.length
@@ -1371,7 +1376,6 @@ async function openFriendRecipes(){
           <div class="meta"><span>👤 ${esc(x.ami)}</span>${Number(x.r.duration) > 0 ? `<span>⏱ ${Number(x.r.duration)} min</span>` : ''}
             ${x.copy === 'mine-changed' ? '<span class="pill">✏️ ta recette, modifiée</span>' : x.copy === 'changed' ? '<span class="pill">✏️ version modifiée</span>' : ''}
             ${importedFrom(x.ami, x.r.id) ? '<span class="pill">✓ déjà importée</span>' : ''}</div>
-          ${Array.isArray(x.r.tags) && x.r.tags.length ? `<div class="tags" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:6px">${x.r.tags.map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}
         </div>`).join('');
   };
   $('#frQ').addEventListener('input', paint);
@@ -1387,7 +1391,7 @@ function cleanFriendRecipe(r, ami){
   const c = {
     id:uid(), name:String(r.name).slice(0, 200), duration: Number(r.duration) > 0 ? Math.round(Number(r.duration)) : 30,
     servings: Number(r.servings) > 0 ? Math.round(Number(r.servings)) : null, url: safeUrl(r.url) || '',
-    tags: (Array.isArray(r.tags) ? r.tags : []).map(t => String(t).slice(0, 40)).filter(Boolean),
+    tags: [],                                  // les étiquettes de l'ami restent les siennes
     ingredients: ings, steps: typeof r.steps === 'string' ? r.steps.slice(0, 20000) : '', origin: { email:ami, id:String(r.id), root: rootOf(r).slice(0, 100) }
   };
   c.origin.sig = recSig(c);                    // pour reconnaître plus tard une copie modifiée
@@ -1404,7 +1408,6 @@ function openFriendRecipe(i){
     <div class="row" style="gap:8px;margin-bottom:12px;flex-wrap:wrap">
       ${Number(r.duration) > 0 ? `<span class="pill">⏱ ${Number(r.duration)} min</span>` : ''}
       ${Number(r.servings) > 0 ? `<span class="pill">👥 ${Number(r.servings)} personne${Number(r.servings)>1?'s':''}</span>` : ''}
-      ${(Array.isArray(r.tags) ? r.tags : []).map(t => `<span class="tag">${esc(t)}</span>`).join('')}
     </div>
     ${safeUrl(r.url) ? `<a class="reclink" href="${esc(safeUrl(r.url))}" target="_blank" rel="noopener noreferrer">
       <span class="reclink-i">🔗</span><span class="reclink-t"><b>Voir la recette en ligne</b><small>${esc(siteOf(safeUrl(r.url)))}</small></span><span class="reclink-a">↗</span></a>` : ''}
