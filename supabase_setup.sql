@@ -289,6 +289,74 @@ grant  execute on function public.retirer_ami(text)           to authenticated;
 grant  execute on function public.mes_amis()                  to authenticated;
 grant  execute on function public.recettes_amis()             to authenticated;
 
+-- 6 quater) Pseudos : un nom affiché à la place de l'adresse e-mail (unique, sans tenir compte des majuscules).
+--    Le compte et les amis restent gérés par e-mail ; on ne voit que le pseudo des gens qu'on connaît
+--    (soi-même, ses amis, les personnes qui nous ont envoyé une demande, les membres de ses foyers).
+create table if not exists public.pseudos (
+  email  text primary key check (email = lower(email)),
+  pseudo text not null,
+  modifie_le timestamptz not null default now()
+);
+create unique index if not exists pseudos_unique on public.pseudos (lower(pseudo));
+alter table public.pseudos enable row level security;
+revoke all on public.pseudos from anon, authenticated;
+
+-- choisir / changer son pseudo (vide = le retirer) ; renvoie le pseudo enregistré
+create or replace function public.definir_pseudo(p text)
+returns text
+language plpgsql security definer set search_path = public
+as $$
+declare
+  moi text := lower(auth.jwt() ->> 'email');
+  v   text := regexp_replace(btrim(coalesce(p, '')), '\s+', ' ', 'g');
+begin
+  if moi is null then raise exception 'Connexion requise'; end if;
+  if v = '' then delete from public.pseudos where email = moi; return null; end if;
+  if char_length(v) < 3 or char_length(v) > 20 then
+    raise exception 'Le pseudo doit faire entre 3 et 20 caractères';
+  end if;
+  if v !~ '^[A-Za-z0-9À-ÖØ-öø-ÿ][A-Za-z0-9À-ÖØ-öø-ÿ ._-]*$' then
+    raise exception 'Lettres, chiffres, espaces, points, tirets et _ uniquement';
+  end if;
+  if exists (select 1 from public.pseudos where lower(pseudo) = lower(v) and email <> moi) then
+    raise exception 'Ce pseudo est déjà pris';
+  end if;
+  insert into public.pseudos (email, pseudo) values (moi, v)
+    on conflict (email) do update set pseudo = excluded.pseudo, modifie_le = now();
+  return v;
+exception when unique_violation then
+  raise exception 'Ce pseudo est déjà pris';
+end;
+$$;
+
+-- les pseudos des personnes que je connais
+create or replace function public.pseudos_connus()
+returns table (email text, pseudo text)
+language sql stable security definer set search_path = public
+as $$
+  with m as (select lower(auth.jwt() ->> 'email') as e),
+  gens as (
+    select m.e as email from m where m.e is not null
+    union
+    select case when d.de = m.e then d.a else d.de end
+      from public.demandes_amis d, m
+     where d.statut = 'accepte' and (d.de = m.e or d.a = m.e)
+    union
+    select d.de from public.demandes_amis d, m where d.a = m.e
+    union
+    select autre.email
+      from public.foyer_membres moi
+      join public.foyer_membres autre on autre.foyer_id = moi.foyer_id, m
+     where moi.email = m.e
+  )
+  select p.email, p.pseudo from public.pseudos p join gens g on g.email = p.email;
+$$;
+
+revoke execute on function public.definir_pseudo(text) from anon, public;
+revoke execute on function public.pseudos_connus()     from anon, public;
+grant  execute on function public.definir_pseudo(text) to authenticated;
+grant  execute on function public.pseudos_connus()     to authenticated;
+
 -- 7) Recharge le cache de l'API pour que l'app voie tout de suite les fonctions
 notify pgrst, 'reload schema';
 
