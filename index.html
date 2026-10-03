@@ -361,10 +361,12 @@
   .catname{flex:1;min-width:0;text-align:left;background:none;border:0;font:inherit;font-weight:700;font-size:15px;color:var(--ink);padding:6px 2px;cursor:pointer;overflow-wrap:anywhere}
   .catname small{display:block;font-weight:400;font-size:12px;color:var(--ink-soft)}
   .iconbtn.sm{width:36px;height:36px;font-size:17px;font-weight:800;color:var(--accent);flex:none}
-  .iconbtn.sm:disabled{opacity:.3}
+  .iconbtn.sm.off{opacity:.25;pointer-events:none}
+  .iconbtn.sm.trash{border-color:rgba(201,83,76,.35)}
+  .iconbtn.sm.trash svg{width:18px;height:18px;stroke:var(--red);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .catitem{flex:1;min-width:0;font-weight:600;font-size:15px;padding:8px 2px;overflow-wrap:anywhere}
   .catings{display:flex;flex-wrap:wrap;gap:6px}
-  .catings .tag{display:inline-flex;align-items:center;gap:4px;padding-right:4px}
-  .catings .tag button{border:0;background:none;color:var(--ink-soft);font-size:15px;line-height:1;padding:0 3px;cursor:pointer}
+
   .tagbox{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
   .tagpick{
     border:1.5px solid var(--line);background:var(--sheet);border-radius:14px;
@@ -1946,8 +1948,11 @@ function renderShop(){
   /* par catégorie, dans l'ordre choisi ; dans chaque catégorie, les produits cochés à la fin */
   const by = new Map(cats.map(c => [c.id, []])), none = [];
   arr.forEach(it => { const c = catOfName(shopName(it)); (c ? by.get(c) : none).push(it); });
-  const group = (title, items, extra = '') => `<div class="shopcat${extra}"><h3>${title}<span>${items.filter(i => !i.done).length}</span></h3>
-    ${items.filter(i => !i.done).concat(items.filter(i => i.done)).map(row).join('')}</div>`;
+  /* dans une catégorie : l'ordre choisi pour ses produits, puis l'ordre d'ajout ; les cochés à la fin */
+  const ord = it => { const m = (state.catOf || {})[catKey(shopName(it))]; return m && typeof m.o === 'number' ? m.o : Infinity; };
+  const group = (title, items, extra = '') => { const s = items.map((it, i) => ({ it, i })).sort((a, b) => (ord(a.it) - ord(b.it)) || a.i - b.i).map(x => x.it);
+    return `<div class="shopcat${extra}"><h3>${title}<span>${items.filter(i => !i.done).length}</span></h3>
+    ${s.filter(i => !i.done).concat(s.filter(i => i.done)).map(row).join('')}</div>`; };
   $('#shopList').innerHTML = cats.filter(c => by.get(c.id).length).map(c => group(esc(c.name), by.get(c.id))).join('') +
     (none.length ? group('Sans catégorie <small>— touche un produit pour le ranger</small>', none, ' none') : '');
 }
@@ -2560,6 +2565,25 @@ function catDefaults(){
   addCat('Droguerie et hygiène');
 }
 const catCount = id => Object.values(state.catOf || {}).filter(m => m && m.c === id).length;
+/* produits d'une catégorie, dans l'ordre choisi (puis alphabétique pour ceux jamais déplacés) */
+function catItems(id){
+  return Object.entries(state.catOf || {}).filter(([, m]) => m && m.c === id)
+    .map(([k, m]) => ({ k, n:m.n || k, o:typeof m.o === 'number' ? m.o : Infinity }))
+    .sort((a, b) => a.o - b.o || a.n.localeCompare(b.n, 'fr'));
+}
+/* déplace un produit d'un cran dans sa catégorie */
+function catMoveItem(id, key, dir){
+  const l = catItems(id), i = l.findIndex(x => x.k === key), j = i + dir;
+  if(i < 0 || j < 0 || j >= l.length) return;
+  [l[i], l[j]] = [l[j], l[i]];
+  state.catOf = Object.assign({}, state.catOf);
+  l.forEach((x, n) => { state.catOf[x.k] = Object.assign({}, state.catOf[x.k], { o:n }); });
+}
+const TRASH = '<svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+/* ↑ ↓ ; en bout de liste, un emplacement vide plutôt qu'un bouton désactivé */
+const moveBtns = (act, attrs, i, n, label) =>
+  (i ? `<button class="iconbtn sm" data-act="${act}" ${attrs} data-dir="-1" aria-label="Monter ${label}">↑</button>` : '<span class="iconbtn sm off" aria-hidden="true">↑</span>') +
+  (i < n - 1 ? `<button class="iconbtn sm" data-act="${act}" ${attrs} data-dir="1" aria-label="Descendre ${label}">↓</button>` : '<span class="iconbtn sm off" aria-hidden="true">↓</span>');
 
 /* ---- ranger un produit de la liste ---- */
 function openShopCat(itemId){
@@ -2586,8 +2610,7 @@ function openCats(){
     ${cats.length ? `<div class="card" style="padding:4px 10px;box-shadow:none;margin:12px 0 0">${cats.map((c, i) => `
       <div class="catrow">
         <button class="catname" data-act="catopen" data-cat="${c.id}">${esc(c.name)}<small>${catCount(c.id)} ingrédient${catCount(c.id) > 1 ? 's' : ''}</small></button>
-        <button class="iconbtn sm" data-act="catmove" data-cat="${c.id}" data-dir="-1" aria-label="Monter ${esc(c.name)}"${i ? '' : ' disabled'}>↑</button>
-        <button class="iconbtn sm" data-act="catmove" data-cat="${c.id}" data-dir="1" aria-label="Descendre ${esc(c.name)}"${i < cats.length - 1 ? '' : ' disabled'}>↓</button>
+        ${moveBtns('catmove', `data-cat="${c.id}"`, i, cats.length, esc(c.name))}
       </div>`).join('')}</div>`
       : `<div class="empty" style="padding:14px">Aucune catégorie pour l’instant.</div>
          <button class="btn block" data-act="catdefaults">Partir de catégories proposées</button>
@@ -2598,15 +2621,33 @@ function openCats(){
     <div class="foot"><button class="btn ghost" data-act="closemodal">Fermer</button></div>`);
   $('#catNew').addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); $('[data-act="catadd"]').click(); } });
 }
-function openCat(id){
+function openCat(id, edit = false){
   const c = catById(id); if(!c){ openCats(); return; }
-  const names = Object.entries(state.catOf || {}).filter(([, m]) => m && m.c === id)
-    .map(([k, m]) => ({ k, n:m.n || k })).sort((a, b) => a.n.localeCompare(b.n, 'fr'));
+  const items = catItems(id);
+  if(edit){
+    /* mode « Modifier » : un produit par ligne, ordre et suppression faciles au doigt */
+    openModal(`
+      <div class="row" style="justify-content:space-between;align-items:center;gap:8px">
+        <h2 style="margin:0">${esc(c.name)}</h2>
+        <button class="btn sm" data-act="catopen" data-cat="${id}" style="flex:none">Terminé</button></div>
+      <div class="muted" style="margin:8px 0">Change l’ordre des produits (c’est celui de ta liste de courses) ou retire-les de la catégorie.</div>
+      ${items.length ? `<div class="card" style="padding:2px 10px;box-shadow:none;margin:0">${items.map((x, i) => `
+        <div class="catrow">
+          <span class="catitem">${esc(x.n)}</span>
+          ${moveBtns('catitemmove', `data-cat="${id}" data-key="${esc(x.k)}"`, i, items.length, esc(x.n))}
+          <button class="iconbtn sm trash" data-act="catunset" data-cat="${id}" data-key="${esc(x.k)}" data-edit="1" aria-label="Retirer ${esc(x.n)} de la catégorie">${TRASH}</button>
+        </div>`).join('')}</div>` : '<div class="empty" style="padding:14px">Plus aucun produit dans cette catégorie.</div>'}
+      <div class="foot"><button class="btn" data-act="catopen" data-cat="${id}">Terminé</button></div>`);
+    return;
+  }
   openModal(`
     <label class="f" style="margin-top:0">Nom de la catégorie</label>
     <input type="text" id="catName" value="${esc(c.name)}" maxlength="40" autocomplete="off">
-    <label class="f">Ingrédients rangés ici (${names.length})</label>
-    ${names.length ? `<div class="catings">${names.map(x => `<span class="tag">${esc(x.n)}<button data-act="catunset" data-cat="${id}" data-key="${esc(x.k)}" aria-label="Retirer ${esc(x.n)}">×</button></span>`).join('')}</div>`
+    <div class="row" style="justify-content:space-between;align-items:flex-end">
+      <label class="f">Ingrédients rangés ici (${items.length})</label>
+      ${items.length ? `<button class="btn line sm" data-act="catedit" data-cat="${id}" style="margin-bottom:6px">✏️ Modifier</button>` : ''}
+    </div>
+    ${items.length ? `<div class="catings">${items.map(x => `<span class="tag">${esc(x.n)}</span>`).join('')}</div>`
       : '<div class="muted">Aucun pour l’instant.</div>'}
     <label class="f">Ajouter un ingrédient</label>
     <input type="text" id="catIng" placeholder="Choisir un ingrédient…">
@@ -2966,8 +3007,10 @@ document.addEventListener('click', e=>{
     case 'catopen': openCat(t.dataset.cat); break;
     case 'catunset': {
       state.catOf = Object.assign({}, state.catOf); delete state.catOf[t.dataset.key];
-      store.save(); renderShop(); openCat(t.dataset.cat); break;
+      store.save(); renderShop(); openCat(t.dataset.cat, !!t.dataset.edit); break;
     }
+    case 'catedit': openCat(t.dataset.cat, true); break;
+    case 'catitemmove': catMoveItem(t.dataset.cat, t.dataset.key, Number(t.dataset.dir)); store.save(); renderShop(); openCat(t.dataset.cat, true); break;
     case 'catdel': {
       const c = catById(t.dataset.cat); if(!c) break;
       const n = catCount(c.id);
