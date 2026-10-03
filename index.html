@@ -343,6 +343,30 @@
   .harmbar{display:flex;align-items:center;width:100%;margin-bottom:10px;padding:11px 14px;border-radius:10px;font:inherit;
     font-weight:700;font-size:14.5px;color:var(--ink);background:var(--hl-soft);border:1.5px dashed var(--hl-line);cursor:pointer;text-align:left}
   .harmbar span{margin-left:auto;font-size:18px}
+  /* catégories de la liste de courses */
+  .shopsortbar{gap:8px;margin:2px 0 8px;flex-wrap:wrap}
+  .shopsortbar:empty{display:none}
+  .shopcat{margin-top:6px}
+  .shopcat h3{display:flex;align-items:baseline;gap:8px;margin:10px 0 2px;font-family:var(--hand);font-size:22px;color:var(--accent);font-weight:700}
+  .shopcat h3 span{font-family:inherit;font-size:15px;color:var(--ink-soft)}
+  .shopcat h3 small{font-family:'Nunito',sans-serif;font-size:12px;color:var(--ink-soft);font-weight:600}
+  .shopcat.none h3{color:var(--ink-soft)}
+  .shopcat .txt[data-act]{cursor:pointer}
+  .catintro{margin:4px 0 10px;padding:11px 13px;border-radius:10px;background:var(--hl-soft);border:1.5px dashed var(--hl-line);font-size:14px;display:flex;flex-direction:column;align-items:flex-start}
+  .catpick{display:flex;flex-direction:column;gap:6px}
+  .catopt{text-align:left;padding:11px 14px;border-radius:10px;border:1.5px solid var(--line);background:var(--sheet);font:inherit;font-weight:700;font-size:15px;color:var(--ink);cursor:pointer}
+  .catopt.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+  .catrow{display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:1px dashed var(--line)}
+  .catrow:last-child{border-bottom:0}
+  .catname{flex:1;min-width:0;text-align:left;background:none;border:0;font:inherit;font-weight:700;font-size:15px;color:var(--ink);padding:6px 2px;cursor:pointer;overflow-wrap:anywhere}
+  .catname small{display:block;font-weight:400;font-size:12px;color:var(--ink-soft)}
+  .iconbtn.sm{width:36px;height:36px;font-size:17px;font-weight:800;color:var(--accent);flex:none}
+  .iconbtn.sm.off{opacity:.25;pointer-events:none}
+  .iconbtn.sm.trash{border-color:rgba(201,83,76,.35)}
+  .iconbtn.sm.trash svg{width:18px;height:18px;stroke:var(--red);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .catitem{flex:1;min-width:0;font-weight:600;font-size:15px;padding:8px 2px;overflow-wrap:anywhere}
+  .catings{display:flex;flex-wrap:wrap;gap:6px}
+
   .tagbox{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
   .tagpick{
     border:1.5px solid var(--line);background:var(--sheet);border-radius:14px;
@@ -585,6 +609,7 @@
         <h2 class="sec" style="margin:0">Ma liste</h2>
         <button class="btn line sm" id="clearDone">Vider les cochés</button>
       </div>
+      <div class="row shopsortbar" id="shopSortBar"></div>
       <div id="shopList"></div>
     </div>
   </section>
@@ -886,6 +911,15 @@ function mergeSet3(b, l, r){
   const added = l.filter(x => !b.includes(x)), removed = b.filter(x => !l.includes(x));
   return Array.from(new Set([...r, ...added])).filter(x => !removed.includes(x));
 }
+/* catégories : contenu fusionné ; l'ordre choisi ici l'emporte s'il a changé ici */
+function mergeCats(b, l, r){
+  const out = mergeList3(b, l, r), ids = x => (x || []).map(c => c && c.id).join('|');
+  if(ids(l) !== ids(b)){
+    const pos = new Map((l || []).map((c, i) => [c.id, i]));
+    out.sort((x, y) => (pos.has(x.id) ? pos.get(x.id) : 1e9) - (pos.has(y.id) ? pos.get(y.id) : 1e9));
+  }
+  return out;
+}
 function mergeState(base, local, remote){
   base = base || {};
   const out = mergeObj3(base, local, remote);                // autres champs éventuels
@@ -893,6 +927,8 @@ function mergeState(base, local, remote){
   out.shopping = mergeList3(base.shopping, local.shopping, remote.shopping);
   out.eaters   = mergeSet3(base.eaters,    local.eaters,    remote.eaters);
   out.mealAsked = mergeSet3(base.mealAsked, local.mealAsked, remote.mealAsked);
+  if(base.cats || local.cats || remote.cats) out.cats = mergeCats(base.cats, local.cats, remote.cats);
+  if(base.catOf || local.catOf || remote.catOf) out.catOf = mergeObj3(base.catOf, local.catOf, remote.catOf);   // produit par produit
   if(base.ingredients || local.ingredients || remote.ingredients)
     out.ingredients = mergeSet3(base.ingredients, local.ingredients, remote.ingredients);
   const md = {}, bd = base.mealDefaults || {}, ld = local.mealDefaults || {}, rd = remote.mealDefaults || {};
@@ -1887,16 +1923,38 @@ function renderRecipes(){
    RENDU — COURSES
    ============================================================ */
 function renderShop(){
-  const arr = state.shopping;
-  $('#shopList').innerHTML = arr.length ? arr.map(it=>`
+  const arr = state.shopping, sort = !!state.shopSort, cats = catList();
+  /* barre de tri : facultative, au choix de chacun */
+  $('#shopSortBar').innerHTML = `<button class="sw${sort ? ' on' : ''}" data-act="shopsort" aria-pressed="${sort}"><span class="sw-box">${sort ? '✓' : ''}</span>Trier par catégorie</button>
+    ${sort ? '<button class="btn line sm" data-act="cats">Catégories…</button>' : ''}`;
+  const row = it => `
     <div class="shopitem${it.done?' done':''}">
       <button class="ck${it.done?' on':''}" data-act="ck" data-id="${it.id}" aria-label="Cocher">
         <svg viewBox="0 0 24 24"><polyline points="4 12 10 18 20 6"/></svg>
       </button>
-      <div class="txt">${esc(it.label)}${it.src?`<small>${esc(it.src)}</small>`:''}</div>
+      <div class="txt"${sort ? ` data-act="shopcat" data-id="${it.id}"` : ''}>${esc(it.label)}${it.src?`<small>${esc(it.src)}</small>`:''}</div>
       <button class="x" data-act="delitem" data-id="${it.id}" aria-label="Supprimer">×</button>
-    </div>`).join('')
-    : `<div class="empty">Ta liste est vide.<br><span class="muted">Ajoute un produit, ou importe les ingrédients d’une semaine du calendrier.</span></div>`;
+    </div>`;
+  if(!arr.length){
+    $('#shopList').innerHTML = `<div class="empty">Ta liste est vide.<br><span class="muted">Ajoute un produit, ou importe les ingrédients d’une semaine du calendrier.</span></div>`;
+    return;
+  }
+  if(!sort){ $('#shopList').innerHTML = arr.map(row).join(''); return; }
+  if(!cats.length){
+    $('#shopList').innerHTML = `<div class="catintro">Range ta liste par catégories (rayons du magasin, par exemple).
+      <button class="btn sm" data-act="cats" style="margin-top:8px">Créer mes catégories</button></div>` + arr.map(row).join('');
+    return;
+  }
+  /* par catégorie, dans l'ordre choisi ; dans chaque catégorie, les produits cochés à la fin */
+  const by = new Map(cats.map(c => [c.id, []])), none = [];
+  arr.forEach(it => { const c = catOfName(shopName(it)); (c ? by.get(c) : none).push(it); });
+  /* dans une catégorie : l'ordre choisi pour ses produits, puis l'ordre d'ajout ; les cochés à la fin */
+  const ord = it => { const m = (state.catOf || {})[catKey(shopName(it))]; return m && typeof m.o === 'number' ? m.o : Infinity; };
+  const group = (title, items, extra = '') => { const s = items.map((it, i) => ({ it, i })).sort((a, b) => (ord(a.it) - ord(b.it)) || a.i - b.i).map(x => x.it);
+    return `<div class="shopcat${extra}"><h3>${title}<span>${items.filter(i => !i.done).length}</span></h3>
+    ${s.filter(i => !i.done).concat(s.filter(i => i.done)).map(row).join('')}</div>`; };
+  $('#shopList').innerHTML = cats.filter(c => by.get(c.id).length).map(c => group(esc(c.name), by.get(c.id))).join('') +
+    (none.length ? group('Sans catégorie <small>— touche un produit pour le ranger</small>', none, ' none') : '');
 }
 let selYear = null;                            // année autour de laquelle la liste a été construite
 let selAnchor = '';                            // semaine du calendrier lors du dernier alignement
@@ -2156,54 +2214,56 @@ let ingStats = { unit:new Map(), names:[] };
    Un ingrédient se choisit dans une liste : le catalogue ci-dessous + ceux ajoutés par le foyer
    (state.ingredients). La « clé » ignore majuscules, accents et pluriel : « tomates », « Tomate »
    et « TOMATE » désignent le même ingrédient, écrit une seule fois « Tomate ». */
-const ING_CATALOG = (
-  // légumes
-  'Ail|Artichaut|Asperge|Aubergine|Avocat|Betterave|Blette|Brocoli|Butternut|Carotte|Céleri|Céleri-rave|Champignon|' +
-  'Champignon de Paris|Cèpe|Girolle|Chou|Chou blanc|Chou rouge|Chou de Bruxelles|Chou-fleur|Chou kale|Chou chinois|Citrouille|' +
-  'Concombre|Courge|Courgette|Cresson|Échalote|Endive|Épinard|Pousse d’épinard|Fenouil|Fève|Haricot blanc|Haricot rouge|' +
-  'Haricot vert|Laitue|Mâche|Maïs|Navet|Oignon|Oignon rouge|Oignon nouveau|Panais|Patate douce|Petit pois|Piment|Poireau|' +
-  'Pois chiche|Pois cassé|Poivron|Poivron rouge|Poivron vert|Poivron jaune|Pomme de terre|Potiron|Potimarron|Radis|Roquette|' +
-  'Salade|Salsifis|Tomate|Tomate cerise|Topinambour|Lentille|Lentille corail|Lentille verte|Gingembre|Olive|Olive noire|' +
-  'Olive verte|Câpre|Cornichon|Germe de soja|Pak choï|Tofu|' +
-  // fruits
-  'Abricot|Ananas|Banane|Cassis|Cerise|Citron|Citron vert|Clémentine|Coing|Datte|Figue|Fraise|Framboise|Fruit de la passion|' +
-  'Grenade|Groseille|Kiwi|Litchi|Mangue|Melon|Mirabelle|Myrtille|Mûre|Nectarine|Orange|Pamplemousse|Pastèque|Pêche|Poire|' +
-  'Pomme|Prune|Pruneau|Raisin|Raisin sec|Rhubarbe|Noix de coco|Noix de coco râpée|' +
-  // fruits secs et graines
-  'Amande|Amande effilée|Poudre d’amande|Cacahuète|Châtaigne|Noisette|Noix|Noix de cajou|Noix de pécan|Pignon de pin|' +
-  'Pistache|Graine de sésame|Graine de courge|Graine de tournesol|Graine de chia|Graine de lin|' +
-  // herbes et épices
-  'Aneth|Basilic|Cerfeuil|Ciboulette|Coriandre|Estragon|Laurier|Menthe|Origan|Persil|Romarin|Sauge|Thym|Herbes de Provence|' +
-  'Bouquet garni|Cannelle|Cardamome|Clou de girofle|Cumin|Curcuma|Curry|Paprika|Piment d’Espelette|Piment de Cayenne|Poivre|' +
-  'Sel|Fleur de sel|Gros sel|Muscade|Safran|Vanille|Gousse de vanille|Anis étoilé|Quatre-épices|Ras el hanout|' +
-  'Gingembre en poudre|Colombo|' +
-  // viandes
-  'Agneau|Gigot d’agneau|Bacon|Bœuf|Bœuf haché|Steak haché|Rôti de bœuf|Poulet|Blanc de poulet|Cuisse de poulet|Canard|' +
-  'Magret de canard|Chair à saucisse|Chorizo|Côte de porc|Porc|Rôti de porc|Filet mignon|Dinde|Escalope de dinde|Veau|' +
-  'Escalope de veau|Jambon|Jambon blanc|Jambon cru|Lapin|Lardon|Merguez|Saucisse|Saucisse de Toulouse|Saucisse de Strasbourg|' +
-  'Saucisson|Pintade|Foie gras|Viande hachée|Pâté|Rillettes|' +
-  // poissons et fruits de mer
-  'Anchois|Bar|Cabillaud|Calamar|Colin|Crevette|Dorade|Lieu noir|Maquereau|Merlu|Moule|Noix de Saint-Jacques|Poisson blanc|' +
-  'Sardine|Saumon|Saumon fumé|Sole|Surimi|Thon|Truite|' +
-  // crèmerie et œufs
-  'Beurre|Beurre demi-sel|Crème fraîche|Crème liquide|Crème épaisse|Crème de coco|Lait|Lait de coco|Lait d’amande|Lait de soja|' +
-  'Lait concentré|Fromage blanc|Fromage frais|Petit-suisse|Yaourt|Yaourt grec|Mascarpone|Mozzarella|Parmesan|Ricotta|Comté|' +
-  'Emmental|Gruyère|Fromage râpé|Chèvre|Feta|Roquefort|Camembert|Brie|Reblochon|Fromage à raclette|Cheddar|Œuf|Jaune d’œuf|' +
-  'Blanc d’œuf|' +
-  // féculents et boulangerie
-  'Riz|Riz basmati|Riz arborio|Riz complet|Pâtes|Spaghetti|Penne|Tagliatelle|Feuille de lasagne|Coquillette|Macaroni|Nouille|' +
-  'Nouille de riz|Vermicelle|Gnocchi|Ravioli|Semoule|Boulgour|Quinoa|Polenta|Flocon d’avoine|Pain|Pain de mie|Baguette|' +
-  'Pain à burger|Pain pita|Tortilla|Pâte brisée|Pâte feuilletée|Pâte sablée|Pâte à pizza|Chapelure|Biscotte|' +
-  // épicerie
-  'Farine|Fécule de maïs|Levure chimique|Levure de boulanger|Bicarbonate de soude|Sucre|Sucre roux|Sucre glace|Sucre vanillé|' +
-  'Cassonade|Miel|Sirop d’érable|Confiture|Chocolat|Chocolat noir|Chocolat au lait|Chocolat blanc|Cacao en poudre|' +
-  'Pépite de chocolat|Gélatine|Agar-agar|Huile|Huile d’olive|Huile de tournesol|Huile de colza|Huile de sésame|Vinaigre|' +
-  'Vinaigre balsamique|Vinaigre de cidre|Vinaigre de vin|Moutarde|Moutarde à l’ancienne|Mayonnaise|Ketchup|Sauce soja|' +
-  'Sauce tomate|Concentré de tomate|Coulis de tomate|Tomate pelée|Pulpe de tomate|Sauce Worcestershire|Sauce piquante|Pesto|' +
-  'Tahini|Harissa|Nuoc-mâm|Pâte de curry|Bouillon de légumes|Bouillon de volaille|Bouillon de bœuf|Fond de veau|Vin blanc|' +
-  'Vin rouge|Bière|Cidre|Porto|Rhum|Eau|Eau gazeuse|Jus de citron|Jus d’orange|Café|Thé|Crème de marron|Feuille de nori|' +
-  'Biscuit|Spéculoos|Biscuit à la cuillère|Meringue|Pâte d’amande|Beurre de cacahuète'
-).split('|');
+/* rangé par rayons : sert aussi aux catégories proposées de la liste de courses */
+const ING_SECTIONS = [
+  ['Fruits et légumes',
+    'Ail|Artichaut|Asperge|Aubergine|Avocat|Betterave|Blette|Brocoli|Butternut|Carotte|Céleri|Céleri-rave|Champignon|' +
+    'Champignon de Paris|Cèpe|Girolle|Chou|Chou blanc|Chou rouge|Chou de Bruxelles|Chou-fleur|Chou kale|Chou chinois|Citrouille|' +
+    'Concombre|Courge|Courgette|Cresson|Échalote|Endive|Épinard|Pousse d’épinard|Fenouil|Fève|Haricot vert|Laitue|Mâche|Maïs|' +
+    'Navet|Oignon|Oignon rouge|Oignon nouveau|Panais|Patate douce|Petit pois|Piment|Poireau|Poivron|Poivron rouge|Poivron vert|' +
+    'Poivron jaune|Pomme de terre|Potiron|Potimarron|Radis|Roquette|Salade|Salsifis|Tomate|Tomate cerise|Topinambour|Gingembre|' +
+    'Germe de soja|Pak choï|Aneth|Basilic|Cerfeuil|Ciboulette|Coriandre|Estragon|Menthe|Persil|Romarin|Sauge|Thym|' +
+    'Abricot|Ananas|Banane|Cassis|Cerise|Citron|Citron vert|Clémentine|Coing|Datte|Figue|Fraise|Framboise|Fruit de la passion|' +
+    'Grenade|Groseille|Kiwi|Litchi|Mangue|Melon|Mirabelle|Myrtille|Mûre|Nectarine|Orange|Pamplemousse|Pastèque|Pêche|Poire|' +
+    'Pomme|Prune|Rhubarbe|Noix de coco'],
+  ['Boucherie et charcuterie',
+    'Agneau|Gigot d’agneau|Bacon|Bœuf|Bœuf haché|Steak haché|Rôti de bœuf|Poulet|Blanc de poulet|Cuisse de poulet|Canard|' +
+    'Magret de canard|Chair à saucisse|Chorizo|Côte de porc|Porc|Rôti de porc|Filet mignon|Dinde|Escalope de dinde|Veau|' +
+    'Escalope de veau|Jambon|Jambon blanc|Jambon cru|Lapin|Lardon|Merguez|Saucisse|Saucisse de Toulouse|Saucisse de Strasbourg|' +
+    'Saucisson|Pintade|Foie gras|Viande hachée|Pâté|Rillettes'],
+  ['Poissonnerie',
+    'Anchois|Bar|Cabillaud|Calamar|Colin|Crevette|Dorade|Lieu noir|Maquereau|Merlu|Moule|Noix de Saint-Jacques|Poisson blanc|' +
+    'Sardine|Saumon|Saumon fumé|Sole|Surimi|Thon|Truite'],
+  ['Crèmerie et frais',
+    'Beurre|Beurre demi-sel|Crème fraîche|Crème liquide|Crème épaisse|Lait|Fromage blanc|Fromage frais|Petit-suisse|Yaourt|' +
+    'Yaourt grec|Mascarpone|Mozzarella|Parmesan|Ricotta|Comté|Emmental|Gruyère|Fromage râpé|Chèvre|Feta|Roquefort|Camembert|' +
+    'Brie|Reblochon|Fromage à raclette|Cheddar|Œuf|Jaune d’œuf|Blanc d’œuf|Tofu|Pâte brisée|Pâte feuilletée|Pâte sablée|' +
+    'Pâte à pizza|Gnocchi|Ravioli'],
+  ['Boulangerie',
+    'Pain|Pain de mie|Baguette|Pain à burger|Pain pita|Tortilla|Biscotte'],
+  ['Pâtes, riz et légumineuses',
+    'Riz|Riz basmati|Riz arborio|Riz complet|Pâtes|Spaghetti|Penne|Tagliatelle|Feuille de lasagne|Coquillette|Macaroni|Nouille|' +
+    'Nouille de riz|Vermicelle|Semoule|Boulgour|Quinoa|Polenta|Flocon d’avoine|Lentille|Lentille corail|Lentille verte|' +
+    'Pois chiche|Pois cassé|Haricot blanc|Haricot rouge'],
+  ['Épicerie salée',
+    'Huile|Huile d’olive|Huile de tournesol|Huile de colza|Huile de sésame|Vinaigre|Vinaigre balsamique|Vinaigre de cidre|' +
+    'Vinaigre de vin|Moutarde|Moutarde à l’ancienne|Mayonnaise|Ketchup|Sauce soja|Sauce tomate|Concentré de tomate|' +
+    'Coulis de tomate|Tomate pelée|Pulpe de tomate|Sauce Worcestershire|Sauce piquante|Pesto|Tahini|Harissa|Nuoc-mâm|' +
+    'Pâte de curry|Bouillon de légumes|Bouillon de volaille|Bouillon de bœuf|Fond de veau|Olive|Olive noire|Olive verte|Câpre|' +
+    'Cornichon|Chapelure|Lait de coco|Crème de coco|Feuille de nori|Laurier|Origan|Herbes de Provence|Bouquet garni|Cannelle|' +
+    'Cardamome|Clou de girofle|Cumin|Curcuma|Curry|Paprika|Piment d’Espelette|Piment de Cayenne|Poivre|Sel|Fleur de sel|Gros sel|' +
+    'Muscade|Safran|Anis étoilé|Quatre-épices|Ras el hanout|Gingembre en poudre|Colombo'],
+  ['Épicerie sucrée',
+    'Farine|Fécule de maïs|Levure chimique|Levure de boulanger|Bicarbonate de soude|Sucre|Sucre roux|Sucre glace|Sucre vanillé|' +
+    'Cassonade|Miel|Sirop d’érable|Confiture|Chocolat|Chocolat noir|Chocolat au lait|Chocolat blanc|Cacao en poudre|' +
+    'Pépite de chocolat|Gélatine|Agar-agar|Vanille|Gousse de vanille|Crème de marron|Biscuit|Spéculoos|Biscuit à la cuillère|' +
+    'Meringue|Pâte d’amande|Beurre de cacahuète|Lait concentré|Lait d’amande|Lait de soja|Pruneau|Raisin|Raisin sec|' +
+    'Noix de coco râpée|Amande|Amande effilée|Poudre d’amande|Cacahuète|Châtaigne|Noisette|Noix|Noix de cajou|Noix de pécan|' +
+    'Pignon de pin|Pistache|Graine de sésame|Graine de courge|Graine de tournesol|Graine de chia|Graine de lin'],
+  ['Boissons',
+    'Vin blanc|Vin rouge|Bière|Cidre|Porto|Rhum|Eau|Eau gazeuse|Jus de citron|Jus d’orange|Café|Thé'],
+];
+const ING_CATALOG = ING_SECTIONS.flatMap(x => x[1].split('|'));
 /* clés de comparaison, au singulier, apostrophes et tirets comme des espaces :
    - accentKey garde les accents : c'est l'identité d'un ingrédient (« Pâte » ≠ « Pâté »)
    - matchKey les ignore : pour retrouver « pates » ou « creme fraiche » */
@@ -2463,6 +2523,153 @@ function paintIngredients(){
     if(from !== name){ ingRename(x => x === from ? name : null); store.save(); render(); paintIngredients(); }
   }));
 }
+/* ---------- catégories de la liste de courses (facultatif) ----------
+   state.cats     : [{ id, name }] dans l'ordre choisi (ex. celui des rayons du magasin)
+   state.catOf    : { clé du produit : { c:id de la catégorie, n:nom affiché } } — retenu pour les prochaines fois
+   state.shopSort : liste triée par catégorie ou non */
+const LEADING_QTY = /^\s*\d+(?:[.,]\d+)?\s*(?:x\s+)?/i;
+/* nom du produit d'une ligne de courses (« Farine — 250 g » → « Farine », « 2 baguettes » → « baguettes ») */
+function shopName(it){
+  if(it.name) return it.name;
+  if(it.key) return String(it.label || '').split(' — ')[0];
+  return String(it.label || '').replace(LEADING_QTY, '') || String(it.label || '');
+}
+const catKey = name => accentKey(ingFind(name) || name);
+const catList = () => Array.isArray(state.cats) ? state.cats : [];
+const catById = id => catList().find(c => c.id === id);
+function catOfName(name){
+  const m = (state.catOf || {})[catKey(name)];
+  return m && catById(m.c) ? m.c : '';
+}
+/* range un produit (et tous ceux qui s'écrivent pareil) ; catId vide = sans catégorie */
+function setCat(name, catId){
+  const k = catKey(name); if(!k) return;
+  state.catOf = Object.assign({}, state.catOf);
+  if(catId) state.catOf[k] = { c:catId, n:ingFind(name) || ingTidy(name) };
+  else delete state.catOf[k];
+}
+function addCat(name){
+  name = ingTidy(name).slice(0, 40); if(!name) return null;
+  const same = catList().find(c => ingKey(c.name) === ingKey(name));
+  if(same) return same;
+  const c = { id:uid(), name };
+  state.cats = catList().concat(c);
+  return c;
+}
+/* catégories proposées : les rayons du catalogue, avec leurs ingrédients déjà rangés */
+function catDefaults(){
+  ING_SECTIONS.forEach(([name, list]) => {
+    const c = addCat(name);
+    list.split('|').forEach(n => { if(!catOfName(n)) setCat(n, c.id); });
+  });
+  addCat('Droguerie et hygiène');
+}
+const catCount = id => Object.values(state.catOf || {}).filter(m => m && m.c === id).length;
+/* produits d'une catégorie, dans l'ordre choisi (puis alphabétique pour ceux jamais déplacés) */
+function catItems(id){
+  return Object.entries(state.catOf || {}).filter(([, m]) => m && m.c === id)
+    .map(([k, m]) => ({ k, n:m.n || k, o:typeof m.o === 'number' ? m.o : Infinity }))
+    .sort((a, b) => a.o - b.o || a.n.localeCompare(b.n, 'fr'));
+}
+/* déplace un produit d'un cran dans sa catégorie */
+function catMoveItem(id, key, dir){
+  const l = catItems(id), i = l.findIndex(x => x.k === key), j = i + dir;
+  if(i < 0 || j < 0 || j >= l.length) return;
+  [l[i], l[j]] = [l[j], l[i]];
+  state.catOf = Object.assign({}, state.catOf);
+  l.forEach((x, n) => { state.catOf[x.k] = Object.assign({}, state.catOf[x.k], { o:n }); });
+}
+const TRASH = '<svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+/* ↑ ↓ ; en bout de liste, un emplacement vide plutôt qu'un bouton désactivé */
+const moveBtns = (act, attrs, i, n, label) =>
+  (i ? `<button class="iconbtn sm" data-act="${act}" ${attrs} data-dir="-1" aria-label="Monter ${label}">↑</button>` : '<span class="iconbtn sm off" aria-hidden="true">↑</span>') +
+  (i < n - 1 ? `<button class="iconbtn sm" data-act="${act}" ${attrs} data-dir="1" aria-label="Descendre ${label}">↓</button>` : '<span class="iconbtn sm off" aria-hidden="true">↓</span>');
+
+/* ---- ranger un produit de la liste ---- */
+function openShopCat(itemId){
+  const it = state.shopping.find(x => x.id === itemId); if(!it) return;
+  const name = ingFind(shopName(it)) || ingTidy(shopName(it)), cur = catOfName(name);
+  openModal(`
+    <h2>Ranger « ${esc(name)} »</h2>
+    <div class="muted" style="margin-bottom:10px">C’est retenu : « ${esc(name)} » ira toujours dans cette catégorie.</div>
+    <div class="catpick">${catList().map(c => `<button class="catopt${c.id === cur ? ' on' : ''}" data-act="setcat" data-id="${it.id}" data-cat="${c.id}">${c.id === cur ? '✓ ' : ''}${esc(c.name)}</button>`).join('')}</div>
+    <label class="f">Nouvelle catégorie</label>
+    <div class="row" style="gap:8px"><input type="text" id="newCatName" placeholder="Ex. Surgelés" maxlength="40" autocomplete="off" style="flex:1">
+      <button class="btn sm" data-act="setcatnew" data-id="${it.id}" style="flex:none">Créer et ranger</button></div>
+    <div class="foot">
+      ${cur ? `<button class="btn ghost" data-act="setcat" data-id="${it.id}" data-cat="">Sans catégorie</button>` : ''}
+      <button class="btn ghost" data-act="closemodal">Annuler</button></div>`);
+}
+
+/* ---- écran « Catégories » : créer, renommer, ordonner, supprimer, choisir les ingrédients ---- */
+function openCats(){
+  const cats = catList();
+  openModal(`
+    <h2>Catégories</h2>
+    <div class="muted">L’ordre ci-dessous est celui de ta liste de courses : mets-les dans l’ordre des rayons de ton magasin. Touche une catégorie pour choisir ses ingrédients.</div>
+    ${cats.length ? `<div class="card" style="padding:4px 10px;box-shadow:none;margin:12px 0 0">${cats.map((c, i) => `
+      <div class="catrow">
+        <button class="catname" data-act="catopen" data-cat="${c.id}">${esc(c.name)}<small>${catCount(c.id)} ingrédient${catCount(c.id) > 1 ? 's' : ''}</small></button>
+        ${moveBtns('catmove', `data-cat="${c.id}"`, i, cats.length, esc(c.name))}
+      </div>`).join('')}</div>`
+      : `<div class="empty" style="padding:14px">Aucune catégorie pour l’instant.</div>
+         <button class="btn block" data-act="catdefaults">Partir de catégories proposées</button>
+         <div class="muted" style="margin-top:6px;font-size:12.5px">Fruits et légumes, Boucherie, Crèmerie… avec les ingrédients courants déjà rangés. Tout reste modifiable.</div>`}
+    <label class="f">${cats.length ? 'Ajouter une catégorie' : 'Ou crée les tiennes'}</label>
+    <div class="row" style="gap:8px"><input type="text" id="catNew" placeholder="Ex. Surgelés" maxlength="40" autocomplete="off" style="flex:1">
+      <button class="btn sm" data-act="catadd" style="flex:none">Ajouter</button></div>
+    <div class="foot"><button class="btn ghost" data-act="closemodal">Fermer</button></div>`);
+  $('#catNew').addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); $('[data-act="catadd"]').click(); } });
+}
+function openCat(id, edit = false){
+  const c = catById(id); if(!c){ openCats(); return; }
+  const items = catItems(id);
+  if(edit){
+    /* mode « Modifier » : un produit par ligne, ordre et suppression faciles au doigt */
+    openModal(`
+      <div class="row" style="justify-content:space-between;align-items:center;gap:8px">
+        <h2 style="margin:0">${esc(c.name)}</h2>
+        <button class="btn sm" data-act="catopen" data-cat="${id}" style="flex:none">Terminé</button></div>
+      <div class="muted" style="margin:8px 0">Change l’ordre des produits (c’est celui de ta liste de courses) ou retire-les de la catégorie.</div>
+      ${items.length ? `<div class="card" style="padding:2px 10px;box-shadow:none;margin:0">${items.map((x, i) => `
+        <div class="catrow">
+          <span class="catitem">${esc(x.n)}</span>
+          ${moveBtns('catitemmove', `data-cat="${id}" data-key="${esc(x.k)}"`, i, items.length, esc(x.n))}
+          <button class="iconbtn sm trash" data-act="catunset" data-cat="${id}" data-key="${esc(x.k)}" data-edit="1" aria-label="Retirer ${esc(x.n)} de la catégorie">${TRASH}</button>
+        </div>`).join('')}</div>` : '<div class="empty" style="padding:14px">Plus aucun produit dans cette catégorie.</div>'}
+      <div class="foot"><button class="btn" data-act="catopen" data-cat="${id}">Terminé</button></div>`);
+    return;
+  }
+  openModal(`
+    <label class="f" style="margin-top:0">Nom de la catégorie</label>
+    <input type="text" id="catName" value="${esc(c.name)}" maxlength="40" autocomplete="off">
+    <div class="row" style="justify-content:space-between;align-items:flex-end">
+      <label class="f">Ingrédients rangés ici (${items.length})</label>
+      ${items.length ? `<button class="btn line sm" data-act="catedit" data-cat="${id}" style="margin-bottom:6px">✏️ Modifier</button>` : ''}
+    </div>
+    ${items.length ? `<div class="catings">${items.map(x => `<span class="tag">${esc(x.n)}</span>`).join('')}</div>`
+      : '<div class="muted">Aucun pour l’instant.</div>'}
+    <label class="f">Ajouter un ingrédient</label>
+    <input type="text" id="catIng" placeholder="Choisir un ingrédient…">
+    <div class="muted" style="margin-top:5px;font-size:12.5px">Un produit ajouté à la main à la liste de courses se range depuis la liste, en le touchant.</div>
+    <div class="foot">
+      <button class="btn ghost" data-act="cats">‹ Catégories</button>
+      <button class="btn danger" data-act="catdel" data-cat="${id}">Supprimer</button></div>`);
+  $('#catName').addEventListener('change', () => {
+    const v = ingTidy($('#catName').value).slice(0, 40); if(!v){ $('#catName').value = c.name; return; }
+    c.name = v; state.cats = catList().slice(); store.save(); renderShop(); toast('Catégorie renommée');
+  });
+  const inp = $('#catIng');
+  const put = name => {
+    const prev = catOfName(name);
+    setCat(name, id); store.save(); renderShop();
+    toast('« ' + name + ' » rangé dans ' + c.name + (prev && prev !== id ? ' (au lieu de ' + catById(prev).name + ')' : ''));
+    openCat(id);
+  };
+  ingAuto.attach(inp, put);
+  inp.addEventListener('ingpicked', () => put(inp.value));
+}
+
 function ingredientRow(name='', qty='', unit='g'){
   /* une ligne déjà remplie garde son unité ; une ligne vide suit l'unité habituelle */
   return `<div class="ingline"${name ? ' data-touched="1"' : ''}>
@@ -2678,6 +2885,7 @@ function doImport(mode){
   const items = keys.map(k=>({
     id: uid(),
     label: groups[k].name + (groups[k].qty ? ' — ' + qtyLabel(groups[k].qty, groups[k].unit) : ''),
+    name: groups[k].name,
     key: k,
     src: 'Semaine ' + w + ' · ' + Array.from(groups[k].src).join(', '),
     done: false
@@ -2779,6 +2987,47 @@ document.addEventListener('click', e=>{
     }
     case 'adding': $('#ingWrap').insertAdjacentHTML('beforeend', ingredientRow()); $('#ingWrap .ingline:last-child .i-name').focus(); break;
     case 'ingredients': closeMenu(); openIngredients(); break;
+    case 'shopsort':
+      state.shopSort = !state.shopSort; store.save(); renderShop();
+      if(state.shopSort && !catList().length) openCats();
+      break;
+    case 'cats': openCats(); break;
+    case 'catdefaults': catDefaults(); store.save(); renderShop(); openCats(); toast('Catégories proposées ajoutées'); break;
+    case 'catadd': {
+      const v = $('#catNew').value; if(!ingTidy(v)) break;
+      const n = catList().length, c = addCat(v); store.save(); renderShop();
+      if(catList().length === n) toast('« ' + c.name + ' » existe déjà');
+      openCats(); break;
+    }
+    case 'catmove': {
+      const l = catList().slice(), i = l.findIndex(c => c.id === t.dataset.cat), j = i + Number(t.dataset.dir);
+      if(i < 0 || j < 0 || j >= l.length) break;
+      [l[i], l[j]] = [l[j], l[i]]; state.cats = l; store.save(); renderShop(); openCats(); break;
+    }
+    case 'catopen': openCat(t.dataset.cat); break;
+    case 'catunset': {
+      state.catOf = Object.assign({}, state.catOf); delete state.catOf[t.dataset.key];
+      store.save(); renderShop(); openCat(t.dataset.cat, !!t.dataset.edit); break;
+    }
+    case 'catedit': openCat(t.dataset.cat, true); break;
+    case 'catitemmove': catMoveItem(t.dataset.cat, t.dataset.key, Number(t.dataset.dir)); store.save(); renderShop(); openCat(t.dataset.cat, true); break;
+    case 'catdel': {
+      const c = catById(t.dataset.cat); if(!c) break;
+      const n = catCount(c.id);
+      if(!confirm('Supprimer la catégorie « ' + c.name + ' » ?' + (n ? '\n' + n + ' ingrédient' + (n > 1 ? 's' : '') + ' redeviendr' + (n > 1 ? 'ont' : 'a') + ' « sans catégorie ».' : ''))) break;
+      state.cats = catList().filter(x => x.id !== c.id);
+      state.catOf = Object.fromEntries(Object.entries(state.catOf || {}).filter(([, m]) => !m || m.c !== c.id));
+      store.save(); renderShop(); openCats(); toast('Catégorie supprimée'); break;
+    }
+    case 'shopcat': openShopCat(id); break;
+    case 'setcat': case 'setcatnew': {
+      const it = state.shopping.find(x => x.id === id); if(!it) break;
+      let cat = t.dataset.cat || '';
+      if(act === 'setcatnew'){ const c = addCat($('#newCatName').value); if(!c){ toast('Donne un nom à la catégorie'); break; } cat = c.id; }
+      setCat(shopName(it), cat); store.save(); renderShop(); closeModal();
+      toast(cat ? '« ' + (ingFind(shopName(it)) || ingTidy(shopName(it))) + ' » rangé dans ' + catById(cat).name : 'Retiré de sa catégorie');
+      break;
+    }
     case 'ingdel': {
       const n = t.dataset.name;
       state.ingredients = (state.ingredients || []).filter(x => x !== n);
