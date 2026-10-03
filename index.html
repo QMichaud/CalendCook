@@ -322,6 +322,27 @@
   .ingline input[type=number]{padding:10px 8px;text-align:center}
   .ingline select{padding:10px 4px;text-align:center}
   .ingline .x{width:32px;height:32px}
+  .i-name.bad,.harm-in.bad{border-color:var(--red);box-shadow:0 0 0 3px rgba(200,70,60,.12)}
+  .ingdrop{margin:-2px 0 9px;background:var(--sheet);border:1.5px solid var(--accent);border-radius:10px;padding:4px;
+    box-shadow:0 6px 18px rgba(30,40,70,.12);max-height:260px;overflow-y:auto}
+  .ingopt{display:flex;align-items:baseline;gap:8px;width:100%;text-align:left;background:none;border:0;border-radius:7px;
+    padding:9px 10px;font:inherit;font-size:15px;color:var(--ink);cursor:pointer}
+  .ingopt small{font-size:11.5px;color:var(--ink-soft)}
+  .ingopt.hi{background:var(--accent-soft)}
+  .ingopt.add{color:var(--accent);font-weight:700;border-top:1px dashed var(--line);border-radius:0 0 7px 7px}
+  .ingdrop-hint{padding:9px 10px;color:var(--ink-soft);font-size:13.5px}
+  .ingadd{padding:8px 8px 6px;display:flex;flex-direction:column;gap:7px}
+  .ingadd .muted{font-size:12.5px}
+  .ingsim{font-size:13px;color:var(--ink-soft);display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+  .ingsim .tag{cursor:pointer;font:inherit;font-size:12.5px}
+  .harm{padding:9px 0;border-bottom:1px dashed var(--line)}
+  .harm-h{display:flex;justify-content:space-between;gap:8px;margin-bottom:6px;overflow-wrap:anywhere}
+  .harm-h small{color:var(--ink-soft);flex:none}
+  .harm-in{width:100%}
+  .ingok{margin-top:10px;padding:10px 12px;border-radius:9px;background:var(--accent-soft);color:var(--accent);font-weight:700;font-size:14px}
+  .harmbar{display:flex;align-items:center;width:100%;margin-bottom:10px;padding:11px 14px;border-radius:10px;font:inherit;
+    font-weight:700;font-size:14.5px;color:var(--ink);background:var(--hl-soft);border:1.5px dashed var(--hl-line);cursor:pointer;text-align:left}
+  .harmbar span{margin-left:auto;font-size:18px}
   .tagbox{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
   .tagpick{
     border:1.5px solid var(--line);background:var(--sheet);border-radius:14px;
@@ -872,6 +893,8 @@ function mergeState(base, local, remote){
   out.shopping = mergeList3(base.shopping, local.shopping, remote.shopping);
   out.eaters   = mergeSet3(base.eaters,    local.eaters,    remote.eaters);
   out.mealAsked = mergeSet3(base.mealAsked, local.mealAsked, remote.mealAsked);
+  if(base.ingredients || local.ingredients || remote.ingredients)
+    out.ingredients = mergeSet3(base.ingredients, local.ingredients, remote.ingredients);
   const md = {}, bd = base.mealDefaults || {}, ld = local.mealDefaults || {}, rd = remote.mealDefaults || {};
   new Set([...Object.keys(bd), ...Object.keys(ld), ...Object.keys(rd)]).forEach(k => {
     const v = mergeSet3(bd[k], ld[k], rd[k]); if(v.length) md[k] = v;
@@ -900,11 +923,12 @@ const cloud = {
   async pull(){
     const rows = await db('recettes_app?select=data&id=eq.' + encodeURIComponent(this.foyer));
     if(rows && rows.length && rows[0].data){
-      state = Object.assign({ recipes:[], plan:{}, shopping:[], eaters:[] }, rows[0].data);
-      migrer();
-      this.setBase(state);
+      state = Object.assign({ recipes:[], plan:{}, shopping:[], eaters:[] }, clone(rows[0].data));
+      const fixed = migrer();
+      this.setBase(rows[0].data);                // base = serveur : les corrections faites ici lui seront envoyées
       store.saveLocal();
       render();
+      if(fixed) this.put();
     } else if(!(await this.flush())){       // foyer tout neuf : on y publie les données de cet appareil
       throw new Error('Envoi impossible');
     }
@@ -949,10 +973,10 @@ const cloud = {
         const touched = !same(state, local);
         const next = touched ? mergeState(local, state, merged) : merged;
         const changed = !same(next, state);
-        state = next; migrer(); store.saveLocal();
-        if(changed) render();
+        state = next; const fixed = migrer(); store.saveLocal();
+        if(changed || fixed) render();
         this.warned = false;
-        if(touched) this.put(); else this.pending = false;
+        if(touched || fixed) this.put(); else this.pending = false;
         return true;
       }
       throw new Error('Trop d’enregistrements simultanés');
@@ -1364,9 +1388,9 @@ async function openFriendRecipes(){
   $('#frWho').value = amis.includes(frFilter.who) ? frFilter.who : '';
   const paint = ()=>{
     frFilter.q = $('#frQ').value; frFilter.who = $('#frWho').value;
-    const q = ingKey(frFilter.q);
-    const hit = r => !q || [r.name, ...(Array.isArray(r.ingredients) ? r.ingredients.map(i => i && i.name) : [])]
-      .some(v => ingKey(v).includes(q));
+    const q = frFilter.q;
+    const hit = r => !ingKey(q) || [r.name, ...(Array.isArray(r.ingredients) ? r.ingredients.map(i => i && i.name) : [])]
+      .some(v => textHit(v, q));
     const list = shown.filter(x => (!frFilter.who || x.ami === frFilter.who) && hit(x.r));
     $('#frList').innerHTML = !shown.length
       ? `<div class="empty">${friends.list.some(f => f.etat === 'ami') ? (frCache.length ? 'Tes amis n’ont pas d’autres recettes que les tiennes.' : 'Tes amis n’ont pas encore de recettes.') : 'Tu n’as pas encore d’amis.<br><span class="muted">Ajoute-en depuis le menu en haut à droite (👥 Amis).</span>'}</div>`
@@ -1385,7 +1409,7 @@ async function openFriendRecipes(){
 /* copie « propre » d'une recette d'ami (données venant d'un autre compte) */
 function cleanFriendRecipe(r, ami){
   const ings = (Array.isArray(r.ingredients) ? r.ingredients : []).filter(i => i && i.name).map(i => ({
-    name:String(i.name).slice(0, 120), qty: Number(i.qty) > 0 ? Number(i.qty) : '',
+    name: ingFind(i.name) || String(i.name).slice(0, 120), qty: Number(i.qty) > 0 ? Number(i.qty) : '',
     unit: UNITS.some(u => u.k === i.unit) ? i.unit : ''
   }));
   const c = {
@@ -1437,6 +1461,7 @@ function toggleMenu(){
     <button class="menu-i accent" data-act="newfoyer"><span class="menu-ck">＋</span><span class="menu-t">Créer un foyer</span></button>
     <div class="menu-sep"></div>
     ${cloud.foyer ? `<button class="menu-i" data-act="foyer"><span class="menu-ck">⚙</span><span class="menu-t">Membres &amp; réglages</span></button>` : ''}
+    <button class="menu-i" data-act="ingredients"><span class="menu-ck">🥕</span><span class="menu-t">Ingrédients</span>${ingUnknown().length ? `<span class="menu-badge">${ingUnknown().length}</span>` : ''}</button>
     <button class="menu-i" data-act="friends"><span class="menu-ck">👥</span><span class="menu-t">Amis</span>${friends.pending ? `<span class="menu-badge">${friends.pending}</span>` : ''}</button>
     <button class="menu-i" data-act="logout"><span class="menu-ck">↩</span><span class="menu-t">Se déconnecter</span></button>
     <div class="menu-foot">${esc(auth.email)}</div>`;
@@ -1686,7 +1711,9 @@ function migrer(){
     }
     state.plan[k] = day;
   });
+  if(ingHarmonize()) changed = true;             // écritures d'ingrédients ramenées à celles de la liste
   if(changed) localStorage.setItem(LS, JSON.stringify(state));
+  return changed;
 }
 
 /* ============================================================
@@ -1833,10 +1860,12 @@ function renderRecipes(){
   clampTags();
 
   let list = state.recipes.slice().sort((a,b)=>a.name.localeCompare(b.name,'fr'));
-  if(q) list = list.filter(r => r.name.toLowerCase().includes(q) || (r.ingredients||[]).some(i=>i.name.toLowerCase().includes(q)));
+  if(q) list = list.filter(r => textHit(r.name, q) || (r.ingredients||[]).some(i => textHit(i.name, q)));
   if(filterTag) list = list.filter(r => (r.tags||[]).includes(filterTag));
 
-  $('#recList').innerHTML = list.length ? list.map(r=>{
+  const unk = ingUnknown().length;
+  const harm = unk ? `<button class="harmbar" data-act="ingredients">🥕 ${unk} ingrédient${unk > 1 ? 's' : ''} à harmoniser<span>›</span></button>` : '';
+  $('#recList').innerHTML = harm + (list.length ? list.map(r=>{
     const ing = (r.ingredients||[]).length;
     const tags = (r.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('');
     return `<div class="rec" data-act="openrec" data-id="${r.id}">
@@ -1851,7 +1880,7 @@ function renderRecipes(){
       ${tags?`<div class="tags" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:7px">${tags}</div>`:''}
       ${ing?`<div class="ing">${esc((r.ingredients||[]).map(i=>i.name + ((i.qty||i.unit) ? ' ('+qtyLabel(i.qty,i.unit)+')' : '')).join(' · '))}</div>`:''}
     </div>`;
-  }).join('') : `<div class="empty">Aucune recette ${q||filterTag?'ne correspond à ce filtre':'pour l’instant'}.<br><span class="muted">Ajoute ta première recette avec le bouton ci-dessus.</span></div>`;
+  }).join('') : `<div class="empty">Aucune recette ${q||filterTag?'ne correspond à ce filtre':'pour l’instant'}.<br><span class="muted">Ajoute ta première recette avec le bouton ci-dessus.</span></div>`);
 }
 
 /* ============================================================
@@ -2038,7 +2067,7 @@ function openPicker(dateKey, slot){
     const q = ($('#pickQ').value||'').trim().toLowerCase();
     const tag = $('#pickTag') ? $('#pickTag').value : '';
     let list = state.recipes.slice().sort((a,b)=>a.name.localeCompare(b.name,'fr'));
-    if(q) list = list.filter(r => r.name.toLowerCase().includes(q) || (r.ingredients||[]).some(i => i.name.toLowerCase().includes(q)));
+    if(q) list = list.filter(r => textHit(r.name, q) || (r.ingredients||[]).some(i => textHit(i.name, q)));
     if(tag) list = list.filter(r => (r.tags||[]).includes(tag));
     $('#pickList').innerHTML = list.length ? list.map(r=>`
       <div class="rec" style="margin-bottom:8px" data-act="doplan" data-id="${r.id}">
@@ -2122,10 +2151,322 @@ function ingredientStats(){
   return { unit, names:Array.from(names.values()).sort((a,b)=>a.localeCompare(b,'fr')) };
 }
 let ingStats = { unit:new Map(), names:[] };
+
+/* ---------- liste commune des ingrédients ----------
+   Un ingrédient se choisit dans une liste : le catalogue ci-dessous + ceux ajoutés par le foyer
+   (state.ingredients). La « clé » ignore majuscules, accents et pluriel : « tomates », « Tomate »
+   et « TOMATE » désignent le même ingrédient, écrit une seule fois « Tomate ». */
+const ING_CATALOG = (
+  // légumes
+  'Ail|Artichaut|Asperge|Aubergine|Avocat|Betterave|Blette|Brocoli|Butternut|Carotte|Céleri|Céleri-rave|Champignon|' +
+  'Champignon de Paris|Cèpe|Girolle|Chou|Chou blanc|Chou rouge|Chou de Bruxelles|Chou-fleur|Chou kale|Chou chinois|Citrouille|' +
+  'Concombre|Courge|Courgette|Cresson|Échalote|Endive|Épinard|Pousse d’épinard|Fenouil|Fève|Haricot blanc|Haricot rouge|' +
+  'Haricot vert|Laitue|Mâche|Maïs|Navet|Oignon|Oignon rouge|Oignon nouveau|Panais|Patate douce|Petit pois|Piment|Poireau|' +
+  'Pois chiche|Pois cassé|Poivron|Poivron rouge|Poivron vert|Poivron jaune|Pomme de terre|Potiron|Potimarron|Radis|Roquette|' +
+  'Salade|Salsifis|Tomate|Tomate cerise|Topinambour|Lentille|Lentille corail|Lentille verte|Gingembre|Olive|Olive noire|' +
+  'Olive verte|Câpre|Cornichon|Germe de soja|Pak choï|Tofu|' +
+  // fruits
+  'Abricot|Ananas|Banane|Cassis|Cerise|Citron|Citron vert|Clémentine|Coing|Datte|Figue|Fraise|Framboise|Fruit de la passion|' +
+  'Grenade|Groseille|Kiwi|Litchi|Mangue|Melon|Mirabelle|Myrtille|Mûre|Nectarine|Orange|Pamplemousse|Pastèque|Pêche|Poire|' +
+  'Pomme|Prune|Pruneau|Raisin|Raisin sec|Rhubarbe|Noix de coco|Noix de coco râpée|' +
+  // fruits secs et graines
+  'Amande|Amande effilée|Poudre d’amande|Cacahuète|Châtaigne|Noisette|Noix|Noix de cajou|Noix de pécan|Pignon de pin|' +
+  'Pistache|Graine de sésame|Graine de courge|Graine de tournesol|Graine de chia|Graine de lin|' +
+  // herbes et épices
+  'Aneth|Basilic|Cerfeuil|Ciboulette|Coriandre|Estragon|Laurier|Menthe|Origan|Persil|Romarin|Sauge|Thym|Herbes de Provence|' +
+  'Bouquet garni|Cannelle|Cardamome|Clou de girofle|Cumin|Curcuma|Curry|Paprika|Piment d’Espelette|Piment de Cayenne|Poivre|' +
+  'Sel|Fleur de sel|Gros sel|Muscade|Safran|Vanille|Gousse de vanille|Anis étoilé|Quatre-épices|Ras el hanout|' +
+  'Gingembre en poudre|Colombo|' +
+  // viandes
+  'Agneau|Gigot d’agneau|Bacon|Bœuf|Bœuf haché|Steak haché|Rôti de bœuf|Poulet|Blanc de poulet|Cuisse de poulet|Canard|' +
+  'Magret de canard|Chair à saucisse|Chorizo|Côte de porc|Porc|Rôti de porc|Filet mignon|Dinde|Escalope de dinde|Veau|' +
+  'Escalope de veau|Jambon|Jambon blanc|Jambon cru|Lapin|Lardon|Merguez|Saucisse|Saucisse de Toulouse|Saucisse de Strasbourg|' +
+  'Saucisson|Pintade|Foie gras|Viande hachée|Pâté|Rillettes|' +
+  // poissons et fruits de mer
+  'Anchois|Bar|Cabillaud|Calamar|Colin|Crevette|Dorade|Lieu noir|Maquereau|Merlu|Moule|Noix de Saint-Jacques|Poisson blanc|' +
+  'Sardine|Saumon|Saumon fumé|Sole|Surimi|Thon|Truite|' +
+  // crèmerie et œufs
+  'Beurre|Beurre demi-sel|Crème fraîche|Crème liquide|Crème épaisse|Crème de coco|Lait|Lait de coco|Lait d’amande|Lait de soja|' +
+  'Lait concentré|Fromage blanc|Fromage frais|Petit-suisse|Yaourt|Yaourt grec|Mascarpone|Mozzarella|Parmesan|Ricotta|Comté|' +
+  'Emmental|Gruyère|Fromage râpé|Chèvre|Feta|Roquefort|Camembert|Brie|Reblochon|Fromage à raclette|Cheddar|Œuf|Jaune d’œuf|' +
+  'Blanc d’œuf|' +
+  // féculents et boulangerie
+  'Riz|Riz basmati|Riz arborio|Riz complet|Pâtes|Spaghetti|Penne|Tagliatelle|Feuille de lasagne|Coquillette|Macaroni|Nouille|' +
+  'Nouille de riz|Vermicelle|Gnocchi|Ravioli|Semoule|Boulgour|Quinoa|Polenta|Flocon d’avoine|Pain|Pain de mie|Baguette|' +
+  'Pain à burger|Pain pita|Tortilla|Pâte brisée|Pâte feuilletée|Pâte sablée|Pâte à pizza|Chapelure|Biscotte|' +
+  // épicerie
+  'Farine|Fécule de maïs|Levure chimique|Levure de boulanger|Bicarbonate de soude|Sucre|Sucre roux|Sucre glace|Sucre vanillé|' +
+  'Cassonade|Miel|Sirop d’érable|Confiture|Chocolat|Chocolat noir|Chocolat au lait|Chocolat blanc|Cacao en poudre|' +
+  'Pépite de chocolat|Gélatine|Agar-agar|Huile|Huile d’olive|Huile de tournesol|Huile de colza|Huile de sésame|Vinaigre|' +
+  'Vinaigre balsamique|Vinaigre de cidre|Vinaigre de vin|Moutarde|Moutarde à l’ancienne|Mayonnaise|Ketchup|Sauce soja|' +
+  'Sauce tomate|Concentré de tomate|Coulis de tomate|Tomate pelée|Pulpe de tomate|Sauce Worcestershire|Sauce piquante|Pesto|' +
+  'Tahini|Harissa|Nuoc-mâm|Pâte de curry|Bouillon de légumes|Bouillon de volaille|Bouillon de bœuf|Fond de veau|Vin blanc|' +
+  'Vin rouge|Bière|Cidre|Porto|Rhum|Eau|Eau gazeuse|Jus de citron|Jus d’orange|Café|Thé|Crème de marron|Feuille de nori|' +
+  'Biscuit|Spéculoos|Biscuit à la cuillère|Meringue|Pâte d’amande|Beurre de cacahuète'
+).split('|');
+/* clés de comparaison, au singulier, apostrophes et tirets comme des espaces :
+   - accentKey garde les accents : c'est l'identité d'un ingrédient (« Pâte » ≠ « Pâté »)
+   - matchKey les ignore : pour retrouver « pates » ou « creme fraiche » */
+const ingSingular = w => w.length > 3 && /[sx]$/.test(w) ? w.slice(0, -1) : w;
+const matchKey = n => ingKey(n).replace(/[^a-z0-9]+/g, ' ').trim().split(' ').map(ingSingular).join(' ');
+const ingLower = n => String(n || '').trim().toLowerCase().replace(/œ/g,'oe').replace(/æ/g,'ae').normalize('NFC');
+const accentKey = n => ingLower(n).replace(/[^a-z0-9à-ÿ]+/g, ' ').trim().split(' ').map(ingSingular).join(' ');
+const hasAccent = n => /[à-ÿ]/.test(ingLower(n));
+/* recherche tolérante : sans accents ni majuscules, « tomates » trouve « Tomate » */
+const textHit = (value, q) => { const a = ingKey(q); if(!a) return true;
+  return ingKey(value).includes(a) || matchKey(value).includes(matchKey(q)); };
+/* écriture propre d'un nouvel ingrédient : espaces nettoyés, majuscule au début */
+function ingTidy(s){
+  s = String(s || '').replace(/['`]/g, '’').replace(/\s+/g, ' ').trim();
+  if(s === s.toUpperCase()) s = s.toLowerCase();                 // « TOMATE » → « tomate »
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+/* toutes les entrées de la liste : catalogue d'abord (il l'emporte), puis ajouts du foyer.
+   Index recalculé seulement quand la liste du foyer change */
+let ingIdx = { sig:null };
+function ingIndex(){
+  const custom = Array.isArray(state.ingredients) ? state.ingredients : [];
+  const sig = JSON.stringify(custom);
+  if(ingIdx.sig === sig) return ingIdx;
+  const seen = new Set(), entries = [], byLoose = new Map();
+  const add = (name, custom) => { const key = accentKey(name); if(!key || seen.has(key)) return; seen.add(key);
+    const e = { name, key, loose:matchKey(name), plain:ingKey(name), custom }; entries.push(e);
+    if(!byLoose.has(e.loose)) byLoose.set(e.loose, []);
+    byLoose.get(e.loose).push(e); };
+  ING_CATALOG.forEach(n => add(n, false));
+  custom.forEach(n => typeof n === 'string' && add(n, true));
+  return ingIdx = { sig, entries, byLoose };
+}
+const ingEntries = () => ingIndex().entries;
+/* l'ingrédient de la liste qui correspond à une écriture, s'il n'y a pas d'ambiguïté :
+   avec des accents, ils doivent correspondre ; sans accent, une seule possibilité */
+function ingFind(name){
+  const c = ingIndex().byLoose.get(matchKey(name)) || [];
+  if(!c.length) return null;
+  const k = accentKey(name), same = c.find(e => e.key === k);
+  if(same) return same.name;
+  return !hasAccent(name) && c.length === 1 ? c[0].name : null;
+}
+/* nombre de recettes utilisant chaque écriture d'ingrédient */
+function ingUsage(){
+  const m = new Map();
+  state.recipes.forEach(r => new Set((r.ingredients || []).filter(i => i && i.name).map(i => i.name))
+    .forEach(n => m.set(n, (m.get(n) || 0) + 1)));
+  return m;
+}
+/* ingrédients de mes recettes qui ne sont pas dans la liste */
+function ingUnknown(){
+  return Array.from(ingUsage()).filter(([n]) => !ingFind(n))
+    .map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+}
+/* renomme des ingrédients dans les recettes. Ce n'est pas une modification de la recette :
+   une copie importée et encore identique à l'original garde une empreinte à jour */
+function ingRename(fn){
+  let n = 0;
+  state.recipes.forEach(r => {
+    if(!Array.isArray(r.ingredients)) return;
+    const sig = r.origin && typeof r.origin === 'object' && typeof r.origin.sig === 'string' ? r.origin.sig : null;
+    const intact = sig !== null && !sigChanged(r, sig);
+    let ch = false;
+    r.ingredients.forEach(i => { if(!i || !i.name) return; const to = fn(i.name); if(to && to !== i.name){ i.name = to; ch = true; } });
+    if(ch){ n++; if(intact) r.origin.sig = recSig(r); }
+  });
+  return n;
+}
+/* harmonisation automatique : écritures qui correspondent sans ambiguïté à un ingrédient de la liste */
+function ingHarmonize(){
+  let changed = false;
+  if(Array.isArray(state.ingredients)){                          // ajouts du foyer : sans doublon ni entrée du catalogue
+    const cat = new Set(ING_CATALOG.map(accentKey)), seen = new Set();
+    const clean = state.ingredients.filter(n => { if(typeof n !== 'string') return false; const k = accentKey(n);
+      if(!k || cat.has(k) || seen.has(k)) return false; seen.add(k); return true; });
+    if(clean.length !== state.ingredients.length){ state.ingredients = clean; changed = true; }
+  }
+  if(ingRename(ingFind)) changed = true;
+  return changed;
+}
+/* ajoute un ingrédient manquant (une seule fois) ; renvoie son nom dans la liste,
+   ou null si l'écriture sans accent peut désigner plusieurs ingrédients existants */
+function ingAdd(raw){
+  const name = ingTidy(raw); if(!name) return '';
+  const exist = ingFind(name);
+  if(exist) return exist;
+  if(!hasAccent(name) && ingIndex().byLoose.has(matchKey(name))) return null;
+  state.ingredients = (Array.isArray(state.ingredients) ? state.ingredients : []).concat(name)
+    .sort((a, b) => a.localeCompare(b, 'fr'));
+  store.save();
+  return name;
+}
+/* distance d'édition (pour « tu voulais dire… ? ») */
+function editDist(a, b){
+  const d = Array.from({ length:b.length + 1 }, (_, j) => j);
+  for(let i = 1; i <= a.length; i++){
+    let prev = d[0]; d[0] = i;
+    for(let j = 1; j <= b.length; j++){ const t = d[j]; d[j] = Math.min(d[j] + 1, d[j-1] + 1, prev + (a[i-1] === b[j-1] ? 0 : 1)); prev = t; }
+  }
+  return d[b.length];
+}
+/* résultats de l'autocomplétion, les plus pertinents d'abord */
+function ingSearch(q, limit = 8){
+  const p = ingKey(q).replace(/[^a-z0-9]+/g, ' ').trim(), mk = matchKey(q);
+  if(!p) return [];
+  const use = ingUsage(), used = new Map();
+  use.forEach((c, n) => used.set(matchKey(n), (used.get(matchKey(n)) || 0) + c));
+  return ingEntries().map(e => {
+    const plain = e.plain.replace(/[^a-z0-9]+/g, ' ');
+    const s = e.loose === mk ? 0 : plain.startsWith(p) ? 1 : plain.split(' ').some(w => w.startsWith(p)) ? 2
+            : plain.includes(p) || e.loose.includes(mk) ? 3 : 9;
+    return { e, s, u:used.get(e.key) || 0 };
+  }).filter(x => x.s < 9)
+    .sort((a, b) => a.s - b.s || b.u - a.u || a.e.name.length - b.e.name.length || a.e.name.localeCompare(b.e.name, 'fr'))
+    .slice(0, limit).map(x => x.e);
+}
+/* ingrédients proches d'un nom à ajouter (faute de frappe, autre écriture) */
+function ingSimilar(name){
+  const k = matchKey(name); if(k.length < 3) return [];
+  return ingEntries().map(e => ({ e, d:editDist(e.loose, k) }))
+    .filter(x => x.d <= (k.length > 6 ? 2 : 1) || (k.length > 3 && (x.e.loose.startsWith(k + ' ') || k.startsWith(x.e.loose + ' '))))
+    .sort((a, b) => a.d - b.d).slice(0, 4).map(x => x.e.name);
+}
+
+/* ---- champ « ingrédient » avec autocomplétion : on doit choisir dans la liste (ou y ajouter) ---- */
+const ingAuto = {
+  input:null, drop:null, onPick:null, items:[], hi:0,
+  attach(input, onPick){
+    input.setAttribute('autocomplete', 'off'); input.setAttribute('autocorrect', 'off');
+    input.addEventListener('focus', () => this.open(input, onPick));
+    input.addEventListener('input', () => { if(this.input !== input) this.open(input, onPick); else this.paint(); });
+    input.addEventListener('keydown', e => this.key(e));
+    input.addEventListener('blur', () => setTimeout(() => {
+      if(this.input !== input || (this.drop && this.drop.contains(document.activeElement))) return;
+      this.close(true);
+    }, 160));
+  },
+  open(input, onPick){
+    if(this.input && this.input !== input) this.close(true);
+    this.input = input; this.onPick = onPick;
+    if(!this.drop){
+      this.drop = document.createElement('div'); this.drop.className = 'ingdrop';
+      /* empêche l'input de perdre le focus quand on touche une proposition */
+      this.drop.addEventListener('pointerdown', e => { if(!e.target.closest('input')) e.preventDefault(); });
+      this.drop.addEventListener('click', e => this.click(e));
+    }
+    const anchor = input.closest('.ingline') || input;
+    anchor.after(this.drop);
+    this.paint();
+  },
+  paint(){
+    if(!this.input || !this.drop) return;
+    /* champ vide de l'écran « à harmoniser » : propositions pour l'écriture à remplacer */
+    const v = this.input.value.trim() || this.input.dataset.seed || '';
+    this.items = ingSearch(v);
+    const exact = v && !!ingFind(v);
+    this.hi = 0;
+    this.drop.innerHTML = !v
+      ? '<div class="ingdrop-hint">Tape le début du nom de l’ingrédient…</div>'
+      : this.items.map((e, i) => `<button type="button" class="ingopt${i === 0 ? ' hi' : ''}" data-i="${i}">${esc(e.name)}${e.custom ? '<small>ajouté par ton foyer</small>' : ''}</button>`).join('') +
+        (exact ? '' : `<button type="button" class="ingopt add" data-add="1">＋ Ajouter « ${esc(ingTidy(v))} » à la liste</button>`);
+  },
+  key(e){
+    if(!this.drop || !this.drop.isConnected) return;
+    const opts = Array.from(this.drop.querySelectorAll('.ingopt'));
+    if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+      e.preventDefault(); if(!opts.length) return;
+      this.hi = (this.hi + (e.key === 'ArrowDown' ? 1 : -1) + opts.length) % opts.length;
+      opts.forEach((o, i) => o.classList.toggle('hi', i === this.hi));
+    } else if(e.key === 'Enter'){
+      e.preventDefault(); if(opts[this.hi]) opts[this.hi].click();
+    } else if(e.key === 'Escape'){ this.close(true); }
+  },
+  click(e){
+    const o = e.target.closest('button'); if(!o) return;
+    if(o.dataset.i !== undefined) return this.pick(this.items[+o.dataset.i].name);
+    if(o.dataset.add) return this.addForm();
+    if(o.dataset.sim) return this.pick(o.dataset.sim);
+    if(o.dataset.addok){ const n = this.drop.querySelector('#ingNew').value; if(!ingTidy(n)) return;
+      const before = ingFind(n), name = ingAdd(n);
+      if(name === null){ toast('Précise l’orthographe (avec les accents) ou choisis un ingrédient proposé'); return; }
+      toast(before ? '« ' + name + ' » existe déjà dans la liste' : '« ' + name + ' » ajouté à la liste');
+      return this.pick(name); }
+    if(o.dataset.addcancel){ this.input.focus(); this.paint(); }
+  },
+  /* ajout d'un ingrédient manquant : écriture à vérifier, proches existants proposés */
+  addForm(){
+    const v = ingTidy(this.input.value.trim() || this.input.dataset.seed || '');
+    const sim = ingSimilar(v);
+    this.drop.innerHTML = `<div class="ingadd">
+      <b>Nouvel ingrédient</b>
+      <input type="text" id="ingNew" value="${esc(v)}" autocomplete="off" maxlength="60">
+      <div class="muted">Vérifie l’orthographe : <b>au singulier</b>, avec les <b>accents</b>, majuscule au début. Il sera proposé à tout ton foyer.</div>
+      ${sim.length ? `<div class="ingsim">Tu voulais peut-être dire : ${sim.map(n => `<button type="button" class="tag" data-sim="${esc(n)}">${esc(n)}</button>`).join(' ')}</div>` : ''}
+      <div class="row" style="gap:6px;margin-top:8px"><button type="button" class="btn ghost sm" data-addcancel="1" style="flex:1">Annuler</button>
+        <button type="button" class="btn sm" data-addok="1" style="flex:1">Ajouter</button></div></div>`;
+    const ni = this.drop.querySelector('#ingNew');
+    ni.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); this.drop.querySelector('[data-addok]').click(); } });
+    ni.addEventListener('blur', () => setTimeout(() => {
+      if(this.drop && !this.drop.contains(document.activeElement) && document.activeElement !== this.input) this.close(true);
+    }, 160));
+    ni.focus(); ni.select();
+  },
+  pick(name){
+    const input = this.input, cb = this.onPick;
+    input.value = name; input.classList.remove('bad');
+    this.close(false);
+    if(cb) cb(name, input);
+  },
+  /* fermeture : une écriture qui correspond à un ingrédient de la liste est corrigée d'office */
+  close(check){
+    const input = this.input; this.input = null;
+    if(this.drop) this.drop.remove();
+    if(check && input && input.isConnected){
+      const v = input.value.trim(), k = ingFind(v);
+      if(k){ if(k !== input.value) this.pickSilent(input, k); input.classList.remove('bad'); }
+      else if(input.classList.contains('i-name')) input.classList.toggle('bad', !!v);
+    }
+  },
+  pickSilent(input, name){ input.value = name; input.dispatchEvent(new Event('ingpicked', { bubbles:true })); }
+};
+
+/* ---- écran « Ingrédients » : à harmoniser + ajouts du foyer ---- */
+function openIngredients(){
+  openModal(`<h2>Ingrédients</h2><div id="ingBody"></div>
+    <div class="foot"><button class="btn ghost" data-act="closemodal">Fermer</button></div>`);
+  paintIngredients();
+}
+function paintIngredients(){
+  const b = $('#ingBody'); if(!b) return;
+  const unknown = ingUnknown(), use = ingUsage();
+  const custom = (Array.isArray(state.ingredients) ? state.ingredients : []).slice().sort((a, b) => a.localeCompare(b, 'fr'));
+  const nUse = n => use.get(n) || 0;
+  b.innerHTML = `
+    <div class="muted">Les ingrédients se choisissent dans une liste commune : ${ING_CATALOG.length} ingrédients courants, plus ceux ajoutés par ton foyer.</div>
+    ${unknown.length ? `<label class="f">À harmoniser (${unknown.length})</label>
+      <div class="muted" style="margin-bottom:6px">Ces écritures de tes recettes ne sont pas dans la liste : choisis l’ingrédient qui correspond, ou ajoute-le.</div>
+      ${unknown.map(u => `<div class="harm"><div class="harm-h"><b>${esc(u.name)}</b><small>dans ${u.count} recette${u.count > 1 ? 's' : ''}</small></div>
+        <input type="text" class="harm-in" data-from="${esc(u.name)}" data-seed="${esc(u.name)}" placeholder="Choisir l’ingrédient correspondant…" aria-label="Ingrédient pour ${esc(u.name)}"></div>`).join('')}`
+      : '<div class="ingok">✓ Tous les ingrédients de tes recettes sont dans la liste.</div>'}
+    <label class="f">Ajoutés par ton foyer</label>
+    ${custom.length ? `<div class="card" style="padding:4px 12px;box-shadow:none;margin:0">${custom.map(n => { const c = nUse(n); return `
+      <div class="shopitem"><div class="txt">${esc(n)}<small>${c ? 'dans ' + c + ' recette' + (c > 1 ? 's' : '') : 'pas encore utilisé'}</small></div>
+        ${c ? '' : `<button class="x" data-act="ingdel" data-name="${esc(n)}" aria-label="Retirer ${esc(n)} de la liste">×</button>`}</div>`; }).join('')}</div>`
+      : '<div class="muted">Aucun pour l’instant. Un ingrédient absent de la liste s’ajoute depuis le formulaire d’une recette.</div>'}`;
+  b.querySelectorAll('.harm-in').forEach(inp => ingAuto.attach(inp, name => {
+    const from = inp.dataset.from;
+    const n = ingRename(x => x === from ? name : null);
+    store.save(); render();
+    toast(from === name ? '« ' + name + ' » est maintenant dans la liste' : '« ' + from + ' » → « ' + name + ' » dans ' + n + ' recette' + (n > 1 ? 's' : ''));
+    paintIngredients();
+  }));
+  /* écriture reconnue en quittant le champ (ex. ajouté entre-temps) : appliquée aussi */
+  b.querySelectorAll('.harm-in').forEach(inp => inp.addEventListener('ingpicked', () => {
+    const from = inp.dataset.from, name = inp.value;
+    if(from !== name){ ingRename(x => x === from ? name : null); store.save(); render(); paintIngredients(); }
+  }));
+}
 function ingredientRow(name='', qty='', unit='g'){
   /* une ligne déjà remplie garde son unité ; une ligne vide suit l'unité habituelle */
   return `<div class="ingline"${name ? ' data-touched="1"' : ''}>
-    <input type="text" class="i-name" placeholder="Ingrédient" list="ingSuggest" value="${esc(name)}">
+    <input type="text" class="i-name" placeholder="Ingrédient" value="${esc(name)}">
     <input type="number" class="i-qty" min="0" step="any" inputmode="decimal" placeholder="Qté" value="${esc(qty ?? '')}">
     <select class="i-unit">${UNITS.map(u=>`<option value="${u.k}"${u.k===unit?' selected':''}>${esc(u.l)}</option>`).join('')}</select>
     <button class="x" data-act="deling" aria-label="Retirer la ligne">×</button>
@@ -2154,7 +2495,6 @@ function openRecipeForm(id, opts = {}){
 
       <label class="f">Ingrédients</label>
       <div class="muted" id="ingFor" style="margin:-2px 0 6px">${r&&r.servings ? 'Quantités pour ' + r.servings + ' personne' + (r.servings>1?'s':'') : 'Quantités pour le nombre de personnes indiqué ci-dessus'}</div>
-      <datalist id="ingSuggest"></datalist>
       <div id="ingWrap">
         ${(r&&r.ingredients&&r.ingredients.length ? r.ingredients : [{name:'',qty:'',unit:'g'}]).map(i=>ingredientRow(i.name,i.qty,i.unit ?? 'g')).join('')}
       </div>
@@ -2180,17 +2520,25 @@ function openRecipeForm(id, opts = {}){
     </form>
   `);
   ingStats = ingredientStats();
-  $('#ingSuggest').innerHTML = ingStats.names.map(n=>`<option value="${esc(n)}">`).join('');
-  /* unité habituelle proposée dès qu'on saisit un ingrédient connu,
-     tant qu'on n'a pas choisi soi-même l'unité de la ligne */
+  /* ingrédient choisi dans la liste : unité habituelle proposée (si on n'a pas choisi soi-même l'unité), puis la quantité */
   const wrap = $('#ingWrap');
-  wrap.addEventListener('input', e=>{
+  const picked = (name, input, move) => {
+    const line = input.closest('.ingline'); if(!line) return;
+    const u = ingStats.unit.get(ingKey(name));
+    if(!line.dataset.touched && u !== undefined) line.querySelector('.i-unit').value = u;
+    if(move) line.querySelector('.i-qty').focus();
+  };
+  const hook = input => ingAuto.attach(input, (name, inp) => picked(name, inp, true));
+  wrap.querySelectorAll('.i-name').forEach(inp => { hook(inp);
+    /* écriture hors liste (recettes d'avant) : signalée tout de suite */
+    if(inp.value.trim() && ingFind(inp.value) !== inp.value.trim()) inp.classList.add('bad'); });
+  wrap.addEventListener('ingpicked', e => picked(e.target.value, e.target, false));
+  wrap.addEventListener('input', e => {                 // écriture reconnue en cours de frappe : unité proposée tout de suite
     if(!e.target.classList.contains('i-name')) return;
-    const line = e.target.closest('.ingline');
-    if(line.dataset.touched) return;
-    const u = ingStats.unit.get(ingKey(e.target.value));
-    if(u !== undefined) line.querySelector('.i-unit').value = u;
+    const n = ingFind(e.target.value); if(n) picked(n, e.target, false);
   });
+  new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(n => n.querySelector && n.querySelectorAll('.i-name').forEach(hook))))
+    .observe(wrap, { childList:true });
   wrap.addEventListener('change', e=>{
     if(e.target.classList.contains('i-unit')) e.target.closest('.ingline').dataset.touched = '1';
   });
@@ -2211,6 +2559,13 @@ function openRecipeForm(id, opts = {}){
     if(!(duration > 0)){ toast('La durée doit être un nombre entier positif'); return; }
     const url = safeUrl($('#rUrl').value);
     if(url === null){ $('#rUrlErr').textContent = 'Ce lien ne semble pas valide (ex. https://www.marmiton.org/…).'; $('#rUrl').focus(); return; }
+    /* chaque ingrédient doit venir de la liste */
+    const bad = Array.from($$('#ingWrap .i-name')).filter(inp => {
+      const v = inp.value.trim(); if(!v) return false;
+      const k = ingFind(v); if(k){ inp.value = k; inp.classList.remove('bad'); return false; }
+      inp.classList.add('bad'); return true;
+    });
+    if(bad.length){ toast('Choisis chaque ingrédient dans la liste (ou ajoute-le)'); bad[0].focus(); return; }
     const ingredients = Array.from($$('#ingWrap .ingline')).map(line=>{
       const n = line.querySelector('.i-name').value.trim();
       const q = parseFloat(String(line.querySelector('.i-qty').value).replace(',', '.'));
@@ -2422,7 +2777,13 @@ document.addEventListener('click', e=>{
       store.save(); closeModal(); render(); toast('Recette supprimée');
       break;
     }
-    case 'adding': $('#ingWrap').insertAdjacentHTML('beforeend', ingredientRow()); break;
+    case 'adding': $('#ingWrap').insertAdjacentHTML('beforeend', ingredientRow()); $('#ingWrap .ingline:last-child .i-name').focus(); break;
+    case 'ingredients': closeMenu(); openIngredients(); break;
+    case 'ingdel': {
+      const n = t.dataset.name;
+      state.ingredients = (state.ingredients || []).filter(x => x !== n);
+      store.save(); paintIngredients(); toast('« ' + n + ' » retiré de la liste'); break;
+    }
     case 'deling': t.closest('.ingline').remove(); break;
     case 'ftag': filterTag = t.dataset.tag || null; renderRecipes(); break;
     case 'ftagall': filterTag = t.dataset.tag || null; closeModal(); renderRecipes(); window.scrollTo({ top:0 }); break;
