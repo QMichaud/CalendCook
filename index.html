@@ -497,6 +497,17 @@
   .shopitem .frbtns{display:flex;gap:6px;flex:none}
   .mail{font-weight:400;color:var(--ink-soft);font-size:.86em}
   .shopitem .txt small.mail{font-size:12px}
+  .clearwrap{position:relative;flex:none}
+  .clearwrap .btn{gap:4px}
+  .clearwrap .caret{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+  .clearwrap .menu{width:215px;top:calc(100% + 6px)}
+  .menu-i.danger{color:var(--red)}
+  .menu-i.danger .menu-ck{color:var(--red)}
+  .trash-i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:-3px}
+  .menu-n{margin-left:auto;font-size:12.5px;color:var(--ink-soft);font-weight:700}
+  .shopitem .x.del{width:34px;height:34px;display:flex;align-items:center;justify-content:center}
+  .shopitem .x.del svg{width:18px;height:18px;stroke:var(--ink-soft);fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+  .shopitem .x.del:active svg,.shopitem .x.del:hover svg{stroke:var(--red)}
   .menu-foot{padding:6px 8px 2px;font-size:11.5px;color:var(--ink-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   input.code{letter-spacing:6px;text-align:center;font-size:22px;font-weight:800}
   .err{color:var(--red);font-size:13px;margin-top:8px;min-height:1em;font-weight:600}
@@ -609,7 +620,14 @@
     <div class="card">
       <div class="row" style="justify-content:space-between;margin-bottom:6px">
         <h2 class="sec" style="margin:0">Ma liste</h2>
-        <button class="btn line sm" id="clearDone">Vider les cochés</button>
+        <div class="clearwrap">
+          <button class="btn line sm" id="clearBtn" aria-haspopup="true" aria-expanded="false">Vider
+            <svg class="caret" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg></button>
+          <div class="menu" id="clearMenu" hidden>
+            <button class="menu-i" data-act="cleardone"><span class="menu-ck">✓</span><span class="menu-t">Vider les cochés</span><span class="menu-n" id="clearDoneN"></span></button>
+            <button class="menu-i danger" data-act="clearall"><span class="menu-ck"><svg class="trash-i" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></span><span class="menu-t">Vider la liste</span></button>
+          </div>
+        </div>
       </div>
       <div class="row shopsortbar" id="shopSortBar"></div>
       <div id="shopList"></div>
@@ -2009,7 +2027,7 @@ function renderShop(){
         <svg viewBox="0 0 24 24"><polyline points="4 12 10 18 20 6"/></svg>
       </button>
       <div class="txt"${sort ? ` data-act="shopcat" data-id="${it.id}"` : ''}>${esc(it.label)}${it.src?`<small>${esc(it.src)}</small>`:''}</div>
-      <button class="x" data-act="delitem" data-id="${it.id}" aria-label="Supprimer">×</button>
+      <button class="x del" data-act="delitem" data-id="${it.id}" aria-label="Supprimer ${esc(shopName(it))}">${TRASH}</button>
     </div>`;
   if(!arr.length){
     $('#shopList').innerHTML = `<div class="empty">Ta liste est vide.<br><span class="muted">Ajoute un produit, ou importe les ingrédients d’une semaine du calendrier.</span></div>`;
@@ -3119,6 +3137,22 @@ document.addEventListener('click', e=>{
       break;
     }
     case 'delitem': state.shopping = state.shopping.filter(x=>x.id!==id); store.save(); renderShop(); break;
+    case 'cleardone': {
+      clearMenu.close();
+      const n = state.shopping.filter(i => i.done).length;
+      if(!n){ toast('Aucun produit coché'); break; }
+      state.shopping = state.shopping.filter(i => !i.done);
+      store.save(); renderShop(); toast(n + ' produit' + (n > 1 ? 's' : '') + ' coché' + (n > 1 ? 's' : '') + ' retiré' + (n > 1 ? 's' : ''));
+      break;
+    }
+    case 'clearall': {
+      clearMenu.close();
+      const n = state.shopping.length;
+      if(!n){ toast('La liste est déjà vide'); break; }
+      if(!confirm('Vider toute la liste de courses ?\n' + n + ' produit' + (n > 1 ? 's' : '') + ' ser' + (n > 1 ? 'ont' : 'a') + ' supprimé' + (n > 1 ? 's' : '') + '.')) break;
+      state.shopping = []; store.save(); renderShop(); toast('Liste vidée');
+      break;
+    }
     case 'import': doImport(t.dataset.mode); break;
     case 'friends': openFriends(); break;
     case 'pseudo': openPseudo(false); break;
@@ -3294,10 +3328,14 @@ function addManual(){
 }
 $('#addItem').addEventListener('click', addManual);
 $('#newItem').addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); addManual(); }});
-$('#clearDone').addEventListener('click', ()=>{
-  state.shopping = state.shopping.filter(i=>!i.done);
-  store.save(); renderShop(); toast('Liste nettoyée');
-});
+/* menu « Vider » : les cochés, ou toute la liste */
+const clearMenu = { el:$('#clearMenu'), btn:$('#clearBtn'),
+  open(){ const n = state.shopping.filter(i => i.done).length;
+    $('#clearDoneN').textContent = n ? n : '';
+    this.el.hidden = false; this.btn.setAttribute('aria-expanded', 'true'); },
+  close(){ this.el.hidden = true; this.btn.setAttribute('aria-expanded', 'false'); } };
+$('#clearBtn').addEventListener('click', () => clearMenu.el.hidden ? clearMenu.open() : clearMenu.close());
+document.addEventListener('click', e => { if(!e.target.closest('.clearwrap')) clearMenu.close(); });
 $('#impWeek').addEventListener('change', renderImport);
 
 /* ============================================================
