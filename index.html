@@ -369,6 +369,11 @@
   .vopt b{display:block;font-size:14.5px}
   .vopt small{font-size:12px;color:var(--ink-soft)}
   .sauto{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+  .pubcheck{margin-top:8px;padding:9px 12px;border-radius:10px;background:#FBE7E5;border:1.5px dashed rgba(201,83,76,.45);font-size:13.5px}
+  .pubcheck.ok{background:var(--accent-soft);border-color:rgba(47,93,168,.35);color:var(--accent-deep)}
+  .pubcheck ul{list-style:none;margin:5px 0 0;padding:0;display:flex;flex-wrap:wrap;gap:3px 12px}
+  .pubcheck li.ok{color:var(--accent-deep)}
+  .pubcheck li.ko{color:var(--red);font-weight:700}
   .sauto small{color:var(--ink-soft);font-size:12.5px}
   .pubb{color:var(--accent-deep);background:var(--accent-soft);border-radius:10px;padding:1px 8px;font-weight:800}
   .pubstat{margin:-4px 0 12px;font-size:13.5px;font-weight:800;color:var(--accent-deep)}
@@ -3212,8 +3217,12 @@ function starsHtml(n, cls = ''){
     [0,1,2,3,4].map(i => `<b class="st${v >= i + .75 ? ' on' : v >= i + .25 ? ' half' : ''}">★</b>`).join('') + '</span>';
 }
 /* « 🌍 Publique · ★ 4,7 (23) · 📥 128 » */
+/* mêmes règles que le serveur : préparation, durée, nombre de personnes, 3 ingrédients, saison */
+const recipeComplete = r => !!(r && String(r.steps || '').trim() && Number(r.duration) > 0 && Number(r.servings) > 0
+  && (r.ingredients || []).filter(i => i && String(i.name || '').trim()).length >= 3 && recipeSeasons(r).length);
 function pubBadge(r){
   const st = pub.stats.get(r.id);
+  if(!recipeComplete(r)) return '🌍 Publique · ⚠️ à compléter';
   return '🌍 Publique' + (st && st.nb_notes ? ` · ★ ${String(st.note).replace('.', ',')} (${st.nb_notes})` : '') + (st && st.nb_imports ? ` · 📥 ${st.nb_imports}` : '');
 }
 const noteLabel = (note, nb) => nb ? `${starsHtml(note)}<i>${String(note).replace('.', ',')}</i>` : '<span class="nonote">pas encore noté</span>';
@@ -3443,7 +3452,8 @@ function openRecipeForm(id, opts = {}){
         <button type="button" class="vopt${r && r.public ? '' : ' on'}" data-vis="0"><b>🔒 Privée</b><small>Ton foyer et tes amis</small></button>
         <button type="button" class="vopt${r && r.public ? ' on' : ''}" data-vis="1"><b>🌍 Publique</b><small>Tous les utilisateurs, dans « Recherche »</small></button>
       </div>
-      <div class="muted" id="rVisHint" style="font-size:12.5px;margin-top:6px">Publique : visible avec ton pseudo, notée de 1 à 5 par les autres. Tu peux la repasser en privée à tout moment.</div>` : ''}
+      <div class="muted" id="rVisHint" style="font-size:12.5px;margin-top:6px">Publique : visible avec ton pseudo, notée de 1 à 5 par les autres. Tu peux la repasser en privée à tout moment.</div>
+      <div id="rPubCheck"></div>` : ''}
 
       <div class="foot">
         <button type="button" class="btn ghost" id="rCancel">Annuler</button>
@@ -3475,7 +3485,7 @@ function openRecipeForm(id, opts = {}){
       ? `<div class="sauto">${seasonPills(auto)}<small>calculées d’après les ingrédients</small></div>`
       : `<div class="tagbox" style="margin:0">${SAISONS.map(x => `<button type="button" class="tagpick${manual.includes(x.k) ? ' on' : ''}" data-saison="${x.k}">${manual.includes(x.k) ? '✓ ' : ''}${x.e} ${x.l}</button>`).join('')}
            <button type="button" class="tagpick${manual.length === 4 ? ' on' : ''}" data-saison="all">${manual.length === 4 ? '✓ ' : ''}Toutes saisons</button></div>
-         <div class="muted" style="font-size:12.5px;margin-top:5px">Les ingrédients ne permettent pas de deviner la saison : choisis-la (facultatif).</div>`;
+         <div class="muted" style="font-size:12.5px;margin-top:5px">Les ingrédients ne permettent pas de deviner la saison : choisis-la (obligatoire pour une recette publique).</div>`;
   };
   $('#rSeasons').addEventListener('click', e => {
     const b = e.target.closest('[data-saison]'); if(!b) return;
@@ -3487,8 +3497,27 @@ function openRecipeForm(id, opts = {}){
   wrap.addEventListener('input', () => { clearTimeout(wrap._st); wrap._st = setTimeout(paintSeasons, 250); });
   new MutationObserver(paintSeasons).observe(wrap, { childList:true });
   paintSeasons();
-  /* visibilité : publique seulement avec un pseudo */
+  /* visibilité : publique seulement avec un pseudo, et une recette complète */
   let isPublic = !!(r && r.public);
+  const pubChecks = () => {
+    const n = formIngs().length;
+    return [
+      { ok: $('#rSteps').value.trim() !== '', l:'la préparation' },
+      { ok: parseInt($('#rDur').value, 10) > 0, l:'la durée' },
+      { ok: parseInt($('#rServ').value, 10) > 0, l:'le nombre de personnes' },
+      { ok: n >= 3, l:'au moins 3 ingrédients' + (n < 3 ? ' (' + n + '/3)' : '') },
+      { ok: !!autoSeasons(formIngs()) || manual.length > 0, l:'la saison' } ];
+  };
+  const paintPubCheck = () => {
+    const box = $('#rPubCheck'); if(!box) return;
+    if(!isPublic){ box.innerHTML = ''; return; }
+    const c = pubChecks(), all = c.every(x => x.ok);
+    box.innerHTML = `<div class="pubcheck${all ? ' ok' : ''}"><b>${all ? '✓ Prête à être publiée' : 'Pour publier, il manque :'}</b>
+      <ul>${c.map(x => `<li class="${x.ok ? 'ok' : 'ko'}">${x.ok ? '✓' : '✗'} ${x.l}</li>`).join('')}</ul></div>`;
+  };
+  $('#recForm').addEventListener('input', () => { clearTimeout(paintPubCheck._t); paintPubCheck._t = setTimeout(paintPubCheck, 200); });
+  $('#recForm').addEventListener('click', () => setTimeout(paintPubCheck, 0));
+  new MutationObserver(() => setTimeout(paintPubCheck, 0)).observe(wrap, { childList:true });
   if($('#rVis')) $('#rVis').addEventListener('click', e => {
     const b = e.target.closest('[data-vis]'); if(!b) return;
     if(b.dataset.vis === '1' && !people.mine){
@@ -3496,7 +3525,9 @@ function openRecipeForm(id, opts = {}){
     }
     isPublic = b.dataset.vis === '1';
     $$('#rVis .vopt').forEach(o => o.classList.toggle('on', o === b));
+    paintPubCheck();
   });
+  paintPubCheck();
   wrap.addEventListener('input', e => {                 // écriture reconnue en cours de frappe : unité proposée tout de suite
     if(!e.target.classList.contains('i-name')) return;
     const n = ingFind(e.target.value); if(n) picked(n, e.target, false);
@@ -3563,6 +3594,10 @@ function openRecipeForm(id, opts = {}){
     const tags = $('#rTags').value.split(',').map(t=>t.trim()).filter(Boolean);
     const uniqTags = Array.from(new Set(tags));
     const steps = $('#rSteps').value.replace(/\s+$/, '');
+    if(isPublic && $('#rVis') && !pubChecks().every(x => x.ok)){
+      paintPubCheck(); $('#rPubCheck').scrollIntoView({ block:'center', behavior:'smooth' });
+      toast('Recette incomplète pour être publique : complète-la ou choisis « Privée »'); return;
+    }
     if(phBusy){ submit.disabled = true; try{ await phBusy; }catch(e){} submit.disabled = false; }   // photo encore en préparation
     const rid = r ? r.id : uid();
     const old = hasPhoto(r) ? r.photo : null;

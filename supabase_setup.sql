@@ -520,6 +520,21 @@ alter table public.imports_publics    enable row level security;
 alter table public.signalements       enable row level security;
 revoke all on public.recettes_publiques, public.notes_publiques, public.imports_publics, public.signalements from anon, authenticated;
 
+-- une recette publique doit être complète : préparation, durée, nombre de personnes,
+-- au moins 3 ingrédients et au moins une saison
+create or replace function public.recette_complete(r jsonb, saisons text[])
+returns boolean
+language sql immutable
+as $$
+  select coalesce(
+       coalesce(btrim(r ->> 'steps'), '') <> ''
+       and coalesce(jsonb_typeof(r -> 'duration') = 'number' and (r ->> 'duration')::numeric > 0, false)
+       and coalesce(jsonb_typeof(r -> 'servings') = 'number' and (r ->> 'servings')::numeric > 0, false)
+       and coalesce(jsonb_typeof(r -> 'ingredients') = 'array'
+         and (select count(*) from jsonb_array_elements(r -> 'ingredients') i where coalesce(btrim(i ->> 'name'), '') <> '') >= 3, false)
+       and coalesce(array_length(saisons, 1), 0) > 0, false);   -- un champ absent compte comme manquant
+$$;
+
 -- publier (ou mettre à jour) une recette du foyer f ; renvoie son identifiant public
 create or replace function public.publier_recette(f text, r jsonb, nom_cle text, ing_cles text[], saisons text[])
 returns uuid
@@ -541,6 +556,9 @@ begin
   end if;
   if rid is null or length(rid) > 100 or coalesce(r ->> 'name', '') = '' then raise exception 'Recette invalide'; end if;
   if length(r::text) > 60000 then raise exception 'Recette trop longue pour être publiée'; end if;
+  if not public.recette_complete(r, saisons) then
+    raise exception 'Recette incomplète : il faut la préparation, la durée, le nombre de personnes, au moins 3 ingrédients et la saison';
+  end if;
   -- photo : seulement des fichiers du dossier de CE foyer (sinon on la retire)
   if jsonb_typeof(r -> 'photo') = 'object'
      and (r -> 'photo' ->> 'f') like dir || '%' and (r -> 'photo' ->> 't') like dir || '%'
@@ -592,6 +610,7 @@ as $$
                from unnest((select w from mots)) x ) as texte
       from public.recettes_publiques p, m
      where m.e is not null and p.visible and p.nb_signalements < 3
+       and public.recette_complete(p.data, p.saisons)
        and exists (select 1 from public.foyer_membres fm where fm.foyer_id = p.foyer_id)
        and not exists (select 1 from unnest((select w from mots)) x
                         where p.nom_cle not like '%' || x || '%'
