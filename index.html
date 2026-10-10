@@ -314,6 +314,16 @@
     border-radius:var(--radius);padding:12px 13px;box-shadow:var(--shadow);cursor:pointer;
   }
   .rec:active{background:var(--paper-2)}
+  .rec.has-ph{display:flex;gap:12px;align-items:flex-start}
+  .rec-b{flex:1;min-width:0}
+  .rec-ph{flex:none;width:64px;height:64px;border-radius:8px;overflow:hidden;background:var(--paper-2);border:1px solid var(--line);margin-top:2px}
+  .rec-ph img{width:100%;height:100%;object-fit:cover;display:block}
+  .mini-av{flex:none;width:38px;height:38px;border-radius:50%;overflow:hidden;position:relative;display:flex;align-items:center;justify-content:center;
+    background:var(--accent-soft);color:var(--accent-deep);font-weight:800;font-size:16px;box-shadow:0 0 0 1.5px rgba(47,93,168,.25)}
+  .mini-av img{width:100%;height:100%;object-fit:cover;display:block}
+  .mini-av.ph-gone{display:flex !important}
+  .mini-av.ph-gone img{display:none}
+  .mini-av.ph-gone::before{content:attr(data-ini)}
   .rec h3{margin:0 0 3px;font-family:var(--hand);font-size:25px;line-height:1.1;font-weight:700;color:var(--ink);overflow-wrap:anywhere}
   .rec .meta{font-size:12.5px;color:var(--ink-soft);display:flex;gap:10px;flex-wrap:wrap;align-items:center;font-weight:600}
   .rec .ing{margin-top:7px;font-size:13px;color:var(--ink-soft);overflow-wrap:anywhere}
@@ -1385,6 +1395,14 @@ const whoText = email => pseudoOf(email) || String(email || '');
 /* pseudo, avec l'adresse en petit dessous (dans une ligne de liste) ; sinon l'adresse seule */
 const whoHtml = email => { const p = pseudoOf(email);
   return p ? `${esc(p)}<small class="mail">${esc(email)}</small>` : esc(email); };
+/* photo de profil ronde, ou l'initiale du pseudo / de l'adresse si la personne n'en a pas */
+const avatarOf = email => {
+  const e = String(email || '').toLowerCase(), av = people.av[e];
+  const ini = esc((pseudoOf(e) || e).trim().charAt(0).toUpperCase() || '?');
+  return photoPathOk(av)
+    ? `<span class="mini-av ph-wait" data-photo-box data-ini="${ini}"><img data-photo="${esc(av)}" data-bucket="avatars" alt=""></span>`
+    : `<span class="mini-av none" aria-hidden="true">${ini}</span>`;
+};
 /* pseudo en gras + adresse entre parenthèses (dans une phrase) */
 const whoInline = email => { const p = pseudoOf(email);
   return p ? `<b>${esc(p)}</b> <span class="mail">(${esc(email)})</span>` : `<b>${esc(email)}</b>`; };
@@ -1512,12 +1530,12 @@ function paintFriends(){
     return l.length ? `<small class="frhome">🏠 membre de ${l.length > 1 ? 'tes foyers' : 'ton foyer'} ${l.map(esc).join(', ')} · recettes déjà partagées</small>` : ''; };
   b.innerHTML = `
     ${recues.length ? `<label class="f">Demandes reçues</label>${box(recues.map(f => `
-      <div class="shopitem"><div class="txt">${whoHtml(f.email)}<small>veut devenir ton ami·e</small>${common(f)}</div>
+      <div class="shopitem">${avatarOf(f.email)}<div class="txt">${whoHtml(f.email)}<small>veut devenir ton ami·e</small>${common(f)}</div>
         <span class="frbtns"><button class="btn sm" data-act="fraccept" data-email="${esc(f.email)}">Accepter</button>
         <button class="btn line sm" data-act="frrefuse" data-email="${esc(f.email)}">Refuser</button></span></div>`).join(''))}` : ''}
     <label class="f">Mes amis</label>
     ${amis.length ? box(amis.map(f => `
-      <div class="shopitem"><div class="txt">${whoHtml(f.email)}${common(f)}</div>
+      <div class="shopitem">${avatarOf(f.email)}<div class="txt">${whoHtml(f.email)}${common(f)}</div>
         <button class="x" data-act="frremove" data-kind="ami" data-email="${esc(f.email)}" aria-label="Retirer de mes amis">×</button></div>`).join(''))
       : '<div class="empty" style="padding:14px">Pas encore d’ami. Ajoute quelqu’un avec son adresse e-mail.</div>'}
     <label class="f">Ajouter un ami</label>
@@ -1528,7 +1546,7 @@ function paintFriends(){
     <div class="err" id="frErr"></div>
     <div class="muted">La personne verra ta demande dans l’app en se connectant avec cette adresse (aucun e-mail n’est envoyé).</div>
     ${env.length ? `<label class="f">Demandes envoyées</label>${box(env.map(f => `
-      <div class="shopitem"><div class="txt">${whoHtml(f.email)}<small>en attente de réponse</small>${common(f)}</div>
+      <div class="shopitem">${avatarOf(f.email)}<div class="txt">${whoHtml(f.email)}<small>en attente de réponse</small>${common(f)}</div>
         <button class="btn line sm" data-act="frremove" data-kind="envoyee" data-email="${esc(f.email)}">Annuler</button></div>`).join(''))}` : ''}`;
   const send = async ()=>{
     const mail = $('#frEmail').value.trim().toLowerCase();
@@ -1627,11 +1645,14 @@ async function openFriendRecipes(){
     $('#frList').innerHTML = !shown.length
       ? `<div class="empty">${friends.list.some(f => f.etat === 'ami') ? (frCache.length ? 'Tes amis n’ont pas d’autres recettes que les tiennes.' : 'Tes amis n’ont pas encore de recettes.') : 'Tu n’as pas encore d’amis.<br><span class="muted">Ajoute-en depuis le menu en haut à droite (👥 Amis).</span>'}</div>`
       : !list.length ? '<div class="empty">Aucune recette ne correspond.</div>'
-      : list.map(x => `<div class="rec" style="margin-bottom:8px" data-act="frrec" data-i="${x.i}">
+      : list.map(x => `<div class="rec${hasPhoto(x.r) ? ' has-ph' : ''}" style="margin-bottom:8px" data-act="frrec" data-i="${x.i}">
+          ${hasPhoto(x.r) ? `<span class="rec-ph ph-wait" data-photo-box><img data-photo="${esc(x.r.photo.t)}" alt=""></span>` : ''}
+          <div class="rec-b">
           <h3>${esc(x.r.name)}</h3>
           <div class="meta"><span>👤 ${esc(whoText(x.ami))}</span>${Number(x.r.duration) > 0 ? `<span>⏱ ${Number(x.r.duration)} min</span>` : ''}
             ${x.copy === 'mine-changed' ? '<span class="pill">✏️ ta recette, modifiée</span>' : x.copy === 'changed' ? '<span class="pill">✏️ version modifiée</span>' : ''}
             ${importedFrom(x.ami, x.r.id) ? '<span class="pill">✓ déjà importée</span>' : ''}</div>
+          </div>
         </div>`).join('');
   };
   $('#frQ').addEventListener('input', paint);
@@ -1842,7 +1863,7 @@ async function openFoyer(){
       <div class="card" style="padding:4px 12px;box-shadow:none;margin:0">
         ${(rows||[]).map(r=>`
           <div class="shopitem">
-            <div class="txt">${whoHtml(r.email)}${r.email===auth.email?' <small>c’est toi</small>':''}</div>
+            ${avatarOf(r.email)}<div class="txt">${whoHtml(r.email)}${r.email===auth.email?' <small>c’est toi</small>':''}</div>
             ${r.email===auth.email ? '' : `<button class="x" data-act="delmembre" data-email="${esc(r.email)}" aria-label="Retirer">×</button>`}
           </div>`).join('')}
       </div>
@@ -2117,7 +2138,9 @@ function renderRecipes(){
   $('#recList').innerHTML = harm + (list.length ? list.map(r=>{
     const ing = (r.ingredients||[]).length;
     const tags = (r.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('');
-    return `<div class="rec" data-act="openrec" data-id="${r.id}">
+    return `<div class="rec${hasPhoto(r) ? ' has-ph' : ''}" data-act="openrec" data-id="${r.id}">
+      ${hasPhoto(r) ? `<span class="rec-ph ph-wait" data-photo-box><img data-photo="${esc(r.photo.t)}" alt=""></span>` : ''}
+      <div class="rec-b">
       <h3>${esc(r.name)}</h3>
       <div class="meta">
         <span>⏱ ${r.duration} min</span>
@@ -2128,6 +2151,7 @@ function renderRecipes(){
       </div>
       ${tags?`<div class="tags" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:7px">${tags}</div>`:''}
       ${ing?`<div class="ing">${esc((r.ingredients||[]).map(i=>i.name + ((i.qty||i.unit) ? ' ('+qtyLabel(i.qty,i.unit)+')' : '')).join(' · '))}</div>`:''}
+      </div>
     </div>`;
   }).join('') : `<div class="empty">Aucune recette ${q||filterTag?'ne correspond à ce filtre':'pour l’instant'}.<br><span class="muted">Ajoute ta première recette avec le bouton ci-dessus.</span></div>`);
 }
