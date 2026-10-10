@@ -366,6 +366,10 @@
   .vis{display:flex;gap:8px}
   .vopt{flex:1;text-align:left;padding:10px 11px;border-radius:10px;border:1.5px solid var(--line);background:var(--sheet);font:inherit;color:var(--ink);cursor:pointer}
   .vopt.on{border-color:var(--accent);background:var(--accent-soft)}
+  .vopt.err{border-color:var(--red);background:#FBE7E5;box-shadow:0 0 0 2px rgba(201,83,76,.18)}
+  .vopt.err b{color:var(--red)}
+  .vopt.shake{animation:vshake .35s}
+  @keyframes vshake{20%,60%{transform:translateX(-4px)}40%,80%{transform:translateX(4px)}}
   .vopt b{display:block;font-size:14.5px}
   .vopt small{font-size:12px;color:var(--ink-soft)}
   .sauto{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
@@ -3508,22 +3512,38 @@ function openRecipeForm(id, opts = {}){
       { ok: n >= 3, l:'au moins 3 ingrédients' + (n < 3 ? ' (' + n + '/3)' : '') },
       { ok: !!autoSeasons(formIngs()) || manual.length > 0, l:'la saison' } ];
   };
+  /* « Publique » refusé tant qu'il manque quelque chose : le bouton passe en erreur, la sélection reste sur « Privée » */
+  let pubTried = false;
   const paintPubCheck = () => {
     const box = $('#rPubCheck'); if(!box) return;
-    if(!isPublic){ box.innerHTML = ''; return; }
-    const c = pubChecks(), all = c.every(x => x.ok);
-    box.innerHTML = `<div class="pubcheck${all ? ' ok' : ''}"><b>${all ? '✓ Prête à être publiée' : 'Pour publier, il manque :'}</b>
-      <ul>${c.map(x => `<li class="${x.ok ? 'ok' : 'ko'}">${x.ok ? '✓' : '✗'} ${x.l}</li>`).join('')}</ul></div>`;
+    const pb = $('#rVis [data-vis="1"]');
+    if(pubTried === 'pseudo'){ box.innerHTML = ''; pb.classList.add('err'); return; }
+    if(!isPublic && !pubTried){ box.innerHTML = ''; pb.classList.remove('err'); return; }
+    const miss = pubChecks().filter(x => !x.ok).map(x => x.l);
+    pb.classList.toggle('err', miss.length > 0);
+    if(!miss.length){
+      box.innerHTML = isPublic ? '' : '<div class="pubcheck ok">✓ Recette complète : tu peux maintenant la rendre publique.</div>';
+      return;
+    }
+    box.innerHTML = `<div class="pubcheck"><b>${isPublic ? 'Pour rester publique' : 'Pour la rendre publique'}, il manque :</b>
+      <ul>${miss.map(l => `<li class="ko">✗ ${l}</li>`).join('')}</ul></div>`;
   };
   $('#recForm').addEventListener('input', () => { clearTimeout(paintPubCheck._t); paintPubCheck._t = setTimeout(paintPubCheck, 200); });
   $('#recForm').addEventListener('click', () => setTimeout(paintPubCheck, 0));
   new MutationObserver(() => setTimeout(paintPubCheck, 0)).observe(wrap, { childList:true });
   if($('#rVis')) $('#rVis').addEventListener('click', e => {
     const b = e.target.closest('[data-vis]'); if(!b) return;
-    if(b.dataset.vis === '1' && !people.mine){
+    const pub = b.dataset.vis === '1';
+    if(pub && !people.mine){
+      pubTried = 'pseudo'; paintPubCheck();
       $('#rVisHint').innerHTML = '<span class="err">Pour publier une recette, choisis d’abord un pseudo (menu en haut à droite → Mon profil).</span>'; return;
     }
-    isPublic = b.dataset.vis === '1';
+    if(pub && !isPublic && !pubChecks().every(x => x.ok)){   // critères non remplis : on reste en privée
+      pubTried = true; paintPubCheck();
+      b.classList.remove('shake'); void b.offsetWidth; b.classList.add('shake');
+      return;
+    }
+    isPublic = pub; pubTried = false;
     $$('#rVis .vopt').forEach(o => o.classList.toggle('on', o === b));
     paintPubCheck();
   });
@@ -3596,7 +3616,7 @@ function openRecipeForm(id, opts = {}){
     const steps = $('#rSteps').value.replace(/\s+$/, '');
     if(isPublic && $('#rVis') && !pubChecks().every(x => x.ok)){
       paintPubCheck(); $('#rPubCheck').scrollIntoView({ block:'center', behavior:'smooth' });
-      toast('Recette incomplète pour être publique : complète-la ou choisis « Privée »'); return;
+      toast('Recette incomplète pour rester publique : complète-la ou choisis « Privée »'); return;
     }
     if(phBusy){ submit.disabled = true; try{ await phBusy; }catch(e){} submit.disabled = false; }   // photo encore en préparation
     const rid = r ? r.id : uid();
