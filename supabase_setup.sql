@@ -63,6 +63,7 @@ begin
   if not found then raise exception 'Tu ne fais pas partie de ce foyer'; end if;
   if not exists (select 1 from public.foyer_membres where foyer_id = f) then
     delete from public.recettes_app where id = f;
+    delete from public.recettes_publiques where foyer_id = f;   -- (table créée plus bas)
   end if;
 end;
 $$;
@@ -76,6 +77,7 @@ begin
   if auth.jwt() ->> 'email' is null then raise exception 'Connexion requise'; end if;
   if not public.est_membre(f) then raise exception 'Tu ne fais pas partie de ce foyer'; end if;
   delete from public.recettes_app  where id = f;
+  delete from public.recettes_publiques where foyer_id = f;      -- (table créée plus bas)
   delete from public.foyer_membres where foyer_id = f;
 end;
 $$;
@@ -315,6 +317,9 @@ declare
 begin
   if moi is null then raise exception 'Connexion requise'; end if;
   if v = '' then
+    if exists (select 1 from public.recettes_publiques where auteur = moi and visible) then
+      raise exception 'Tu as des recettes publiques : il te faut un pseudo';
+    end if;
     update public.pseudos set pseudo = null, modifie_le = now() where email = moi;
     delete from public.pseudos where email = moi and avatar is null;
     return null;
@@ -473,6 +478,266 @@ create policy "avatars remplacement" on storage.objects for update to authentica
   with check (bucket_id = 'avatars' and (storage.foldername(name))[1] = encode(convert_to(lower(auth.jwt() ->> 'email'), 'UTF8'), 'hex'));
 create policy "avatars suppression" on storage.objects for delete to authenticated
   using (bucket_id = 'avatars' and (storage.foldername(name))[1] = encode(convert_to(lower(auth.jwt() ->> 'email'), 'UTF8'), 'hex'));
+
+-- 6 septies) Recettes publiques (onglet « Recherche ») : notes de 1 à 5, imports, signalements.
+--    Une recette publiée est COPIÉE ici (le reste du foyer reste privé). Le texte de recherche est
+--    préparé par l'app (sans accents, au singulier). Seuls les utilisateurs connectés y accèdent,
+--    et uniquement par les fonctions ci-dessous. Il faut un pseudo pour publier.
+create table if not exists public.recettes_publiques (
+  pid        uuid primary key default gen_random_uuid(),
+  foyer_id   text not null,
+  recette_id text not null,
+  auteur     text not null,
+  data       jsonb not null,
+  nom_cle    text not null default '',          -- titre normalisé
+  ing_cles   text[] not null default '{}',      -- ingrédients normalisés
+  saisons    text[] not null default '{}',
+  photos     text[] not null default '{}',      -- fichiers de la photo (lisibles par tous les connectés)
+  visible    boolean not null default true,
+  nb_notes   int not null default 0,
+  somme_notes int not null default 0,
+  nb_imports int not null default 0,
+  nb_signalements int not null default 0,
+  cree_le    timestamptz not null default now(),
+  modifie_le timestamptz not null default now(),
+  unique (foyer_id, recette_id)
+);
+create index if not exists recettes_publiques_ing on public.recettes_publiques using gin (ing_cles);
+create index if not exists recettes_publiques_photos on public.recettes_publiques using gin (photos);
+create table if not exists public.notes_publiques (
+  pid uuid not null references public.recettes_publiques(pid) on delete cascade,
+  email text not null, note int not null check (note between 1 and 5),
+  modifie_le timestamptz not null default now(), primary key (pid, email));
+create table if not exists public.imports_publics (
+  pid uuid not null references public.recettes_publiques(pid) on delete cascade,
+  email text not null, cree_le timestamptz not null default now(), primary key (pid, email));
+create table if not exists public.signalements (
+  pid uuid not null references public.recettes_publiques(pid) on delete cascade,
+  email text not null, motif text, cree_le timestamptz not null default now(), primary key (pid, email));
+alter table public.recettes_publiques enable row level security;
+alter table public.notes_publiques    enable row level security;
+alter table public.imports_publics    enable row level security;
+alter table public.signalements       enable row level security;
+revoke all on public.recettes_publiques, public.notes_publiques, public.imports_publics, public.signalements from anon, authenticated;
+
+-- publier (ou mettre à jour) une recette du foyer f ; renvoie son identifiant public
+create or replace function public.publier_recette(f text, r jsonb, nom_cle text, ing_cles text[], saisons text[])
+returns uuid
+language plpgsql security definer set search_path = public
+as $$
+declare
+  moi text := lower(auth.jwt() ->> 'email');
+  dir text := encode(convert_to(f, 'UTF8'), 'hex') || '/';
+  rid text := r ->> 'id';
+  ph  text[] := '{}';
+  out uuid;
+begin
+  if moi is null then raise exception 'Connexion requise'; end if;
+  if not public.est_membre(f) then raise exception 'Tu ne fais pas partie de ce foyer'; end if;
+  -- nouvelle publication : il faut un pseudo (une mise à jour par un autre membre du foyer reste possible)
+  if not exists (select 1 from public.recettes_publiques where foyer_id = f and recette_id = rid)
+     and not exists (select 1 from public.pseudos where email = moi and pseudo is not null) then
+    raise exception 'Choisis d''abord un pseudo (menu → Mon profil) pour publier';
+  end if;
+  if rid is null or length(rid) > 100 or coalesce(r ->> 'name', '') = '' then raise exception 'Recette invalide'; end if;
+  if length(r::text) > 60000 then raise exception 'Recette trop longue pour être publiée'; end if;
+  -- photo : seulement des fichiers du dossier de CE foyer (sinon on la retire)
+  if jsonb_typeof(r -> 'photo') = 'object'
+     and (r -> 'photo' ->> 'f') like dir || '%' and (r -> 'photo' ->> 't') like dir || '%'
+     and position('..' in (r -> 'photo' ->> 'f') || (r -> 'photo' ->> 't')) = 0 then
+    ph := array[r -> 'photo' ->> 'f', r -> 'photo' ->> 't'];
+  else
+    r := r - 'photo';
+  end if;
+  insert into public.recettes_publiques as p (foyer_id, recette_id, auteur, data, nom_cle, ing_cles, saisons, photos)
+  values (f, rid, moi, r, left(coalesce(nom_cle, ''), 300), (coalesce(ing_cles, '{}'))[1:80], (coalesce(saisons, '{}'))[1:4], ph)
+  on conflict (foyer_id, recette_id) do update
+    set data = excluded.data, nom_cle = excluded.nom_cle, ing_cles = excluded.ing_cles,
+        saisons = excluded.saisons, photos = excluded.photos, visible = true, modifie_le = now()
+  returning p.pid into out;
+  return out;
+end;
+$$;
+
+-- repasser une recette en privée (notes et imports gardés), ou l'effacer (recette supprimée)
+create or replace function public.depublier_recette(f text, rid text, effacer boolean default false)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if auth.jwt() ->> 'email' is null then raise exception 'Connexion requise'; end if;
+  if not public.est_membre(f) then raise exception 'Tu ne fais pas partie de ce foyer'; end if;
+  if effacer then delete from public.recettes_publiques where foyer_id = f and recette_id = rid;
+  else update public.recettes_publiques set visible = false, modifie_le = now() where foyer_id = f and recette_id = rid;
+  end if;
+end;
+$$;
+
+-- recherche : mots (tous présents, dans le titre ou les ingrédients), ingrédients avec / sans,
+-- note minimale, saison ; tri par pertinence (titre > ingrédients, puis note ajustée, puis imports)
+create or replace function public.chercher_recettes(
+  q text default '', avec text[] default '{}', sans text[] default '{}',
+  note_min numeric default 0, saison text default '', tri text default 'pertinence', page int default 0)
+returns table (pid uuid, data jsonb, auteur_pseudo text, auteur_avatar text, note numeric, nb_notes int,
+               nb_imports int, ma_note int, mienne boolean, saisons text[], total bigint)
+language sql stable security definer set search_path = public
+as $$
+  with m as (select lower(auth.jwt() ->> 'email') as e),
+  mots as (select array_remove(string_to_array(btrim(lower(coalesce(q, ''))), ' '), '') as w),
+  base as (
+    select p.*,
+           (3 * 3.5 + p.somme_notes)::numeric / (3 + p.nb_notes) as ajustee,
+           case when p.nb_notes > 0 then round(p.somme_notes::numeric / p.nb_notes, 1) end as moyenne,
+           ( select coalesce(sum(case when p.nom_cle like '%' || x || '%' then 2 else 0.6 end), 0)
+               from unnest((select w from mots)) x ) as texte
+      from public.recettes_publiques p, m
+     where m.e is not null and p.visible and p.nb_signalements < 3
+       and exists (select 1 from public.foyer_membres fm where fm.foyer_id = p.foyer_id)
+       and not exists (select 1 from unnest((select w from mots)) x
+                        where p.nom_cle not like '%' || x || '%'
+                          and not exists (select 1 from unnest(p.ing_cles) i where i like '%' || x || '%'))
+       and p.ing_cles @> coalesce(avec, '{}')
+       and not (p.ing_cles && coalesce(sans, '{}'))
+       and (coalesce(saison, '') = '' or saison = any(p.saisons))
+       and (coalesce(note_min, 0) <= 0 or (p.nb_notes > 0 and p.somme_notes::numeric / p.nb_notes >= note_min))
+  )
+  select b.pid, b.data, ps.pseudo, ps.avatar, b.moyenne, b.nb_notes, b.nb_imports,
+         (select n.note from public.notes_publiques n, m where n.pid = b.pid and n.email = m.e),
+         exists (select 1 from public.foyer_membres fm, m where fm.foyer_id = b.foyer_id and fm.email = m.e),
+         b.saisons, count(*) over ()
+    from base b left join public.pseudos ps on ps.email = b.auteur
+   order by case tri when 'note' then b.ajustee when 'imports' then b.nb_imports
+                     when 'recent' then extract(epoch from b.modifie_le)
+                     else b.texte * 2 + b.ajustee + 0.6 * ln(1 + b.nb_imports) end desc,
+            b.modifie_le desc
+   limit 20 offset greatest(coalesce(page, 0), 0) * 20;
+$$;
+
+-- une recette publique précise (fiche ouverte, après une note…)
+create or replace function public.recette_publique(id uuid)
+returns table (pid uuid, data jsonb, auteur_pseudo text, auteur_avatar text, note numeric, nb_notes int,
+               nb_imports int, ma_note int, mienne boolean, saisons text[])
+language sql stable security definer set search_path = public
+as $$
+  with m as (select lower(auth.jwt() ->> 'email') as e)
+  select p.pid, p.data, ps.pseudo, ps.avatar,
+         case when p.nb_notes > 0 then round(p.somme_notes::numeric / p.nb_notes, 1) end, p.nb_notes, p.nb_imports,
+         (select n.note from public.notes_publiques n where n.pid = p.pid and n.email = m.e),
+         exists (select 1 from public.foyer_membres fm where fm.foyer_id = p.foyer_id and fm.email = m.e),
+         p.saisons
+    from public.recettes_publiques p cross join m left join public.pseudos ps on ps.email = p.auteur
+   where m.e is not null and p.pid = id and p.visible;
+$$;
+
+-- noter (1 à 5) ou retirer sa note (null) ; pas ses propres recettes
+create or replace function public.noter_recette(id uuid, note int)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare moi text := lower(auth.jwt() ->> 'email');
+begin
+  if moi is null then raise exception 'Connexion requise'; end if;
+  if not exists (select 1 from public.recettes_publiques where pid = id and visible) then raise exception 'Recette introuvable'; end if;
+  if exists (select 1 from public.recettes_publiques p join public.foyer_membres fm on fm.foyer_id = p.foyer_id
+              where p.pid = id and fm.email = moi) then
+    raise exception 'Tu ne peux pas noter une recette de ton foyer';
+  end if;
+  if note is null then delete from public.notes_publiques where pid = id and email = moi;
+  elsif note between 1 and 5 then
+    insert into public.notes_publiques (pid, email, note) values (id, moi, note)
+      on conflict (pid, email) do update set note = excluded.note, modifie_le = now();
+  else raise exception 'La note va de 1 à 5';
+  end if;
+  update public.recettes_publiques p
+     set nb_notes = (select count(*) from public.notes_publiques n where n.pid = id),
+         somme_notes = (select coalesce(sum(n.note), 0) from public.notes_publiques n where n.pid = id)
+   where p.pid = id;
+end;
+$$;
+
+-- compter un import (une fois par personne, pas pour son propre foyer)
+create or replace function public.compter_import(id uuid)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare moi text := lower(auth.jwt() ->> 'email');
+begin
+  if moi is null then raise exception 'Connexion requise'; end if;
+  if exists (select 1 from public.recettes_publiques p join public.foyer_membres fm on fm.foyer_id = p.foyer_id
+              where p.pid = id and fm.email = moi) then return; end if;
+  insert into public.imports_publics (pid, email) select id, moi
+   where exists (select 1 from public.recettes_publiques where pid = id) on conflict do nothing;
+  update public.recettes_publiques p set nb_imports = (select count(*) from public.imports_publics i where i.pid = id) where p.pid = id;
+end;
+$$;
+
+-- signaler (une fois par personne) ; à partir de 3 signalements, la recette n'apparaît plus
+create or replace function public.signaler_recette(id uuid, motif text default '')
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare moi text := lower(auth.jwt() ->> 'email');
+begin
+  if moi is null then raise exception 'Connexion requise'; end if;
+  insert into public.signalements (pid, email, motif) select id, moi, left(coalesce(motif, ''), 300)
+   where exists (select 1 from public.recettes_publiques where pid = id) on conflict do nothing;
+  update public.recettes_publiques p set nb_signalements = (select count(*) from public.signalements s where s.pid = id) where p.pid = id;
+end;
+$$;
+
+-- statistiques des recettes publiées d'un de mes foyers (badge dans « Recettes »)
+create or replace function public.mes_publications(f text)
+returns table (recette_id text, pid uuid, visible boolean, note numeric, nb_notes int, nb_imports int)
+language sql stable security definer set search_path = public
+as $$
+  select p.recette_id, p.pid, p.visible,
+         case when p.nb_notes > 0 then round(p.somme_notes::numeric / p.nb_notes, 1) end, p.nb_notes, p.nb_imports
+    from public.recettes_publiques p
+   where p.foyer_id = f and public.est_membre(f);
+$$;
+
+-- photos et photos de profil des recettes publiques : lisibles par tous les connectés
+create or replace function public.photo_publique(nom text)
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select exists (select 1 from public.recettes_publiques p
+                  where p.visible and p.nb_signalements < 3 and p.photos @> array[nom]);
+$$;
+create or replace function public.avatar_auteur_public(dossier text)
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select exists (select 1 from public.recettes_publiques p
+                  where p.visible and encode(convert_to(p.auteur, 'UTF8'), 'hex') = dossier);
+$$;
+drop policy if exists "photos publiques lecture"  on storage.objects;
+drop policy if exists "avatars auteurs lecture"   on storage.objects;
+create policy "photos publiques lecture" on storage.objects for select to authenticated
+  using (bucket_id = 'photos' and public.photo_publique(name));
+create policy "avatars auteurs lecture" on storage.objects for select to authenticated
+  using (bucket_id = 'avatars' and public.avatar_auteur_public((storage.foldername(name))[1]));
+
+revoke execute on function public.publier_recette(text, jsonb, text, text[], text[]) from anon, public;
+revoke execute on function public.depublier_recette(text, text, boolean)             from anon, public;
+revoke execute on function public.chercher_recettes(text, text[], text[], numeric, text, text, int) from anon, public;
+revoke execute on function public.recette_publique(uuid)                             from anon, public;
+revoke execute on function public.noter_recette(uuid, int)                           from anon, public;
+revoke execute on function public.compter_import(uuid)                               from anon, public;
+revoke execute on function public.signaler_recette(uuid, text)                       from anon, public;
+revoke execute on function public.mes_publications(text)                             from anon, public;
+revoke execute on function public.photo_publique(text)                               from anon, public;
+revoke execute on function public.avatar_auteur_public(text)                         from anon, public;
+grant  execute on function public.publier_recette(text, jsonb, text, text[], text[]) to authenticated;
+grant  execute on function public.depublier_recette(text, text, boolean)             to authenticated;
+grant  execute on function public.chercher_recettes(text, text[], text[], numeric, text, text, int) to authenticated;
+grant  execute on function public.recette_publique(uuid)                             to authenticated;
+grant  execute on function public.noter_recette(uuid, int)                           to authenticated;
+grant  execute on function public.compter_import(uuid)                               to authenticated;
+grant  execute on function public.signaler_recette(uuid, text)                       to authenticated;
+grant  execute on function public.mes_publications(text)                             to authenticated;
+grant  execute on function public.photo_publique(text)                               to authenticated;
+grant  execute on function public.avatar_auteur_public(text)                         to authenticated;
 
 -- 7) Recharge le cache de l'API pour que l'app voie tout de suite les fonctions
 notify pgrst, 'reload schema';
