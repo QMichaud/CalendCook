@@ -294,9 +294,12 @@ grant  execute on function public.recettes_amis()             to authenticated;
 --    (soi-même, ses amis, les personnes qui nous ont envoyé une demande, les membres de ses foyers).
 create table if not exists public.pseudos (
   email  text primary key check (email = lower(email)),
-  pseudo text not null,
+  pseudo text,
   modifie_le timestamptz not null default now()
 );
+-- photo de profil (chemin dans le dossier « avatars ») ; le pseudo devient facultatif
+alter table public.pseudos alter column pseudo drop not null;
+alter table public.pseudos add column if not exists avatar text;
 create unique index if not exists pseudos_unique on public.pseudos (lower(pseudo));
 alter table public.pseudos enable row level security;
 revoke all on public.pseudos from anon, authenticated;
@@ -311,7 +314,11 @@ declare
   v   text := regexp_replace(btrim(coalesce(p, '')), '\s+', ' ', 'g');
 begin
   if moi is null then raise exception 'Connexion requise'; end if;
-  if v = '' then delete from public.pseudos where email = moi; return null; end if;
+  if v = '' then
+    update public.pseudos set pseudo = null, modifie_le = now() where email = moi;
+    delete from public.pseudos where email = moi and avatar is null;
+    return null;
+  end if;
   if char_length(v) < 3 or char_length(v) > 20 then
     raise exception 'Le pseudo doit faire entre 3 et 20 caractères';
   end if;
@@ -329,9 +336,34 @@ exception when unique_violation then
 end;
 $$;
 
--- les pseudos des personnes que je connais
-create or replace function public.pseudos_connus()
-returns table (email text, pseudo text)
+-- photo de profil : chemin dans MON dossier du stockage « avatars » (vide = la retirer)
+create or replace function public.definir_avatar(p text)
+returns text
+language plpgsql security definer set search_path = public
+as $$
+declare
+  moi text := lower(auth.jwt() ->> 'email');
+  v   text := btrim(coalesce(p, ''));
+begin
+  if moi is null then raise exception 'Connexion requise'; end if;
+  if v = '' then
+    update public.pseudos set avatar = null, modifie_le = now() where email = moi;
+    delete from public.pseudos where email = moi and pseudo is null;
+    return null;
+  end if;
+  if v !~ ('^' || encode(convert_to(moi, 'UTF8'), 'hex') || '/[A-Za-z0-9_-]{1,80}\.(webp|jpg)$') then
+    raise exception 'Photo de profil invalide';
+  end if;
+  insert into public.pseudos (email, avatar) values (moi, v)
+    on conflict (email) do update set avatar = excluded.avatar, modifie_le = now();
+  return v;
+end;
+$$;
+
+-- les pseudos (et photos de profil) des personnes que je connais
+drop function if exists public.pseudos_connus();
+create function public.pseudos_connus()
+returns table (email text, pseudo text, avatar text)
 language sql stable security definer set search_path = public
 as $$
   with m as (select lower(auth.jwt() ->> 'email') as e),
@@ -349,11 +381,13 @@ as $$
       join public.foyer_membres autre on autre.foyer_id = moi.foyer_id, m
      where moi.email = m.e
   )
-  select p.email, p.pseudo from public.pseudos p join gens g on g.email = p.email;
+  select p.email, p.pseudo, p.avatar from public.pseudos p join gens g on g.email = p.email;
 $$;
 
 revoke execute on function public.definir_pseudo(text) from anon, public;
 revoke execute on function public.pseudos_connus()     from anon, public;
+revoke execute on function public.definir_avatar(text) from anon, public;
+grant  execute on function public.definir_avatar(text) to authenticated;
 grant  execute on function public.definir_pseudo(text) to authenticated;
 grant  execute on function public.pseudos_connus()     to authenticated;
 
@@ -407,6 +441,38 @@ create policy "photos remplacement" on storage.objects for update to authenticat
   with check (bucket_id = 'photos' and public.photo_dossier_membre((storage.foldername(name))[1]));
 create policy "photos suppression" on storage.objects for delete to authenticated
   using (bucket_id = 'photos' and public.photo_dossier_membre((storage.foldername(name))[1]));
+
+-- 6 sexies) Photos de profil (dossier privé « avatars ») : un dossier par personne (adresse en hexadécimal).
+--    Chacun gère la sienne ; elle est visible par ceux qui voient son pseudo
+--    (soi, ses amis, les personnes qui lui ont envoyé une demande, les membres de ses foyers).
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('avatars', 'avatars', false, 524288, array['image/webp', 'image/jpeg'])
+on conflict (id) do update set public = false, file_size_limit = excluded.file_size_limit,
+                               allowed_mime_types = excluded.allowed_mime_types;
+
+create or replace function public.avatar_dossier_lisible(dossier text)
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select dossier = encode(convert_to(lower(auth.jwt() ->> 'email'), 'UTF8'), 'hex')
+      or exists (select 1 from public.pseudos_connus() c where encode(convert_to(c.email, 'UTF8'), 'hex') = dossier);
+$$;
+revoke execute on function public.avatar_dossier_lisible(text) from anon, public;
+grant  execute on function public.avatar_dossier_lisible(text) to authenticated;
+
+drop policy if exists "avatars lecture"      on storage.objects;
+drop policy if exists "avatars ajout"        on storage.objects;
+drop policy if exists "avatars remplacement" on storage.objects;
+drop policy if exists "avatars suppression"  on storage.objects;
+create policy "avatars lecture" on storage.objects for select to authenticated
+  using (bucket_id = 'avatars' and public.avatar_dossier_lisible((storage.foldername(name))[1]));
+create policy "avatars ajout" on storage.objects for insert to authenticated
+  with check (bucket_id = 'avatars' and (storage.foldername(name))[1] = encode(convert_to(lower(auth.jwt() ->> 'email'), 'UTF8'), 'hex'));
+create policy "avatars remplacement" on storage.objects for update to authenticated
+  using (bucket_id = 'avatars' and (storage.foldername(name))[1] = encode(convert_to(lower(auth.jwt() ->> 'email'), 'UTF8'), 'hex'))
+  with check (bucket_id = 'avatars' and (storage.foldername(name))[1] = encode(convert_to(lower(auth.jwt() ->> 'email'), 'UTF8'), 'hex'));
+create policy "avatars suppression" on storage.objects for delete to authenticated
+  using (bucket_id = 'avatars' and (storage.foldername(name))[1] = encode(convert_to(lower(auth.jwt() ->> 'email'), 'UTF8'), 'hex'));
 
 -- 7) Recharge le cache de l'API pour que l'app voie tout de suite les fonctions
 notify pgrst, 'reload schema';

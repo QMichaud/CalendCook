@@ -314,6 +314,16 @@
     border-radius:var(--radius);padding:12px 13px;box-shadow:var(--shadow);cursor:pointer;
   }
   .rec:active{background:var(--paper-2)}
+  .rec.has-ph{display:flex;gap:12px;align-items:flex-start}
+  .rec-b{flex:1;min-width:0}
+  .rec-ph{flex:none;width:64px;height:64px;border-radius:8px;overflow:hidden;background:var(--paper-2);border:1px solid var(--line);margin-top:2px}
+  .rec-ph img{width:100%;height:100%;object-fit:cover;display:block}
+  .mini-av{flex:none;width:38px;height:38px;border-radius:50%;overflow:hidden;position:relative;display:flex;align-items:center;justify-content:center;
+    background:var(--accent-soft);color:var(--accent-deep);font-weight:800;font-size:16px;box-shadow:0 0 0 1.5px rgba(47,93,168,.25)}
+  .mini-av img{width:100%;height:100%;object-fit:cover;display:block}
+  .mini-av.ph-gone{display:flex !important}
+  .mini-av.ph-gone img{display:none}
+  .mini-av.ph-gone::before{content:attr(data-ini)}
   .rec h3{margin:0 0 3px;font-family:var(--hand);font-size:25px;line-height:1.1;font-weight:700;color:var(--ink);overflow-wrap:anywhere}
   .rec .meta{font-size:12.5px;color:var(--ink-soft);display:flex;gap:10px;flex-wrap:wrap;align-items:center;font-weight:600}
   .rec .ing{margin-top:7px;font-size:13px;color:var(--ink-soft);overflow-wrap:anywhere}
@@ -514,6 +524,22 @@
     box-shadow:0 0 0 2px var(--sheet);
   }
   .acct-dot[hidden]{display:none}
+  .acct-av{display:none;width:26px;height:26px;border-radius:50%;overflow:hidden;flex:none;background:var(--paper-2);margin:-3px 0 -3px -4px;
+    box-shadow:0 0 0 1.5px rgba(47,93,168,.35)}
+  .acct-av img{width:100%;height:100%;object-fit:cover;display:block}
+  .acct.has-av .acct-av{display:block}
+  .acct.has-av #acctIcon{display:none}
+  .acct.has-av .acct-av.ph-gone{display:none !important}
+  .acct.has-av .acct-av.ph-gone ~ #acctIcon{display:inline-block}
+  .avfield{display:flex;align-items:center;gap:14px}
+  .avprev{width:84px;height:84px;border-radius:50%;overflow:hidden;flex:none;background:var(--paper-2);display:flex;align-items:center;justify-content:center;
+    box-shadow:0 0 0 2px var(--sheet), 0 0 0 3.5px rgba(47,93,168,.3)}
+  .avprev img{width:100%;height:100%;object-fit:cover;display:block}
+  .avprev svg{width:44px;height:44px;stroke:var(--ink-soft);fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+  .avprev.ph-gone{display:flex !important}
+  .avbtns{display:flex;flex-direction:column;gap:7px;flex:1;min-width:0}
+  #avPick{cursor:pointer}
+  #avDel[hidden]{display:none}
   #friendRecBtn[hidden]{display:none}
   .origin{margin:-4px 0 12px;padding:8px 11px;border-radius:8px;background:var(--hl-soft);border:1px solid var(--hl-line);font-size:13.5px;color:var(--ink)}
   .shopitem .frbtns{display:flex;gap:6px;flex:none}
@@ -548,7 +574,8 @@
       <small>Calendrier · Catalogue · Liste de courses</small>
     </div>
     <button class="acct" id="acctBtn" hidden aria-label="Mon compte et mon foyer">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>
+      <span class="acct-av" id="acctAv" data-photo-box></span>
+      <svg id="acctIcon" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>
       <span id="acctLab">Connexion</span>
       <svg class="caret" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
       <span class="acct-dot" id="acctDot" hidden aria-label="Demandes d’amis reçues"></span>
@@ -1229,6 +1256,13 @@ function paintAccount(){
   $('#acctBtn').classList.toggle('off', !cloud.on);
   $('#acctLab').textContent = !auth.session ? 'Se connecter' : (cloud.foyer || 'Mon foyer');
   $('#acctBtn').classList.toggle('nomenu', !auth.session);
+  /* photo de profil à la place du bonhomme (le bonhomme revient si elle ne se charge pas) */
+  const av = people.myAvatar, box = $('#acctAv');
+  $('#acctBtn').classList.toggle('has-av', !!av);
+  if(box.dataset.path !== av){
+    box.dataset.path = av; box.classList.remove('ph-gone');
+    box.innerHTML = av ? `<img data-photo="${esc(av)}" data-bucket="avatars" alt="">` : '';
+  }
   friends.paint();
 }
 function paintSync(){ paintAccount(); renderWeek(); }
@@ -1317,27 +1351,41 @@ function openCode(email){
    (fonctions SQL : demander_ami, repondre_ami, retirer_ami,
     mes_amis, recettes_amis — seules les recettes sont partagées)
    ============================================================ */
-/* ---------- pseudos : affichés à la place des adresses e-mail ----------
-   Le compte et les amis restent gérés par e-mail. Fonctions SQL : definir_pseudo, pseudos_connus
-   (on ne reçoit que les pseudos des gens qu'on connaît : amis, demandes reçues, membres de ses foyers) */
+/* ---------- profil : pseudo (affiché à la place de l'adresse e-mail) et photo de profil ----------
+   Le compte et les amis restent gérés par e-mail. Fonctions SQL : definir_pseudo, definir_avatar, pseudos_connus
+   (on ne reçoit que le profil des gens qu'on connaît : amis, demandes reçues, membres de ses foyers) */
 const people = {
-  map: {}, ok: false,
+  map: {}, av: {}, ok: false,
   get mine(){ return auth.session ? this.map[auth.email] || '' : ''; },
+  get myAvatar(){ return auth.session && photoPathOk(this.av[auth.email]) ? this.av[auth.email] : ''; },
+  /* après avoir changé sa photo : relit son profil, puis efface l'ancienne photo du stockage */
+  async reloadMine(oldAv){
+    try{
+      const rows = await db('rpc/pseudos_connus', { method:'POST', body:'{}' });
+      const me = (Array.isArray(rows) ? rows : []).find(r => r && String(r.email).toLowerCase() === auth.email);
+      this.av = Object.assign({}, this.av);
+      if(me && me.avatar && photoPathOk(me.avatar)) this.av[auth.email] = String(me.avatar); else delete this.av[auth.email];
+    }catch(e){}
+    if(oldAv && oldAv !== this.av[auth.email]) photos.remove([oldAv], 'avatars');
+    paintAccount();
+  },
   async load(){
     if(!CLOUD_OK || !auth.session){ this.map = {}; this.ok = false; return; }
     try{
       const rows = await db('rpc/pseudos_connus', { method:'POST', body:'{}' });
       if(!Array.isArray(rows)) throw new Error('Réponse inattendue');
-      const m = {};
-      rows.forEach(r => { if(r && r.email && r.pseudo) m[String(r.email).toLowerCase()] = String(r.pseudo); });
-      const changed = !same(m, this.map);
-      this.map = m; this.ok = true;
+      const m = {}, a = {};
+      rows.forEach(r => { if(!r || !r.email) return; const e = String(r.email).toLowerCase();
+        if(r.pseudo) m[e] = String(r.pseudo); if(r.avatar && photoPathOk(r.avatar)) a[e] = String(r.avatar); });
+      const changed = !same(m, this.map), avChanged = !same(a, this.av);
+      this.map = m; this.av = a; this.ok = true;
       if(changed){ render(); if($('#frBody')) paintFriends(); }
+      if(avChanged) paintAccount();
     }catch(e){ this.ok = false; return; }                // base pas encore à jour : on garde les e-mails
     /* première connexion sans pseudo : on le propose une fois (sans interrompre une autre fenêtre) */
     const k = 'mesrecettes.pseudoAsked.' + auth.email;
     if(!this.mine && !localStorage.getItem(k) && !$('#modal').classList.contains('on')){
-      localStorage.setItem(k, '1'); openPseudo(true);
+      localStorage.setItem(k, '1'); openProfile(true);
     }
   }
 };
@@ -1347,16 +1395,33 @@ const whoText = email => pseudoOf(email) || String(email || '');
 /* pseudo, avec l'adresse en petit dessous (dans une ligne de liste) ; sinon l'adresse seule */
 const whoHtml = email => { const p = pseudoOf(email);
   return p ? `${esc(p)}<small class="mail">${esc(email)}</small>` : esc(email); };
+/* photo de profil ronde, ou l'initiale du pseudo / de l'adresse si la personne n'en a pas */
+const avatarOf = email => {
+  const e = String(email || '').toLowerCase(), av = people.av[e];
+  const ini = esc((pseudoOf(e) || e).trim().charAt(0).toUpperCase() || '?');
+  return photoPathOk(av)
+    ? `<span class="mini-av ph-wait" data-photo-box data-ini="${ini}"><img data-photo="${esc(av)}" data-bucket="avatars" alt=""></span>`
+    : `<span class="mini-av none" aria-hidden="true">${ini}</span>`;
+};
 /* pseudo en gras + adresse entre parenthèses (dans une phrase) */
 const whoInline = email => { const p = pseudoOf(email);
   return p ? `<b>${esc(p)}</b> <span class="mail">(${esc(email)})</span>` : `<b>${esc(email)}</b>`; };
 
-function openPseudo(first){
+function openProfile(first){
   closeMenu();
-  const cur = people.mine;
+  const cur = people.mine, curAv = people.myAvatar;
   openModal(`
-    <h2>${first ? 'Choisis ton pseudo' : 'Mon pseudo'}</h2>
-    <div class="muted">${first ? 'Il sera affiché à la place de ton adresse e-mail pour tes amis et les membres de tes foyers. ' : ''}Ton compte et tes amis restent gérés avec ton adresse <b>${esc(auth.email)}</b>.</div>
+    <h2>${first ? 'Ton profil' : 'Mon profil'}</h2>
+    <div class="muted">${first ? 'Ton pseudo et ta photo seront affichés à la place de ton adresse e-mail pour tes amis et les membres de tes foyers. ' : ''}Ton compte et tes amis restent gérés avec ton adresse <b>${esc(auth.email)}</b>.</div>
+    <label class="f">Photo de profil <span class="opt">(facultatif)</span></label>
+    <div class="avfield">
+      <span class="avprev${curAv ? ' ph-wait' : ''}" id="avPrev" data-photo-box>${curAv ? `<img data-photo="${esc(curAv)}" data-bucket="avatars" alt="">` : AVATAR_ICON}</span>
+      <div class="avbtns">
+        <label class="btn ghost sm" for="avFile" id="avPick">📷 ${curAv ? 'Changer la photo' : 'Ajouter une photo'}</label>
+        <button type="button" class="btn line sm" id="avDel"${curAv ? '' : ' hidden'}>Retirer</button>
+      </div>
+      <input type="file" id="avFile" accept="image/*" class="vh">
+    </div>
     <label class="f">Pseudo</label>
     <input type="text" id="psIn" value="${esc(cur)}" maxlength="20" autocomplete="off" autocapitalize="off" placeholder="Ex. Quentin, Chloé_92…">
     <div class="muted" style="margin-top:5px;font-size:12.5px">3 à 20 caractères : lettres, chiffres, espaces, points, tirets et _. Chaque pseudo est unique.</div>
@@ -1364,21 +1429,55 @@ function openPseudo(first){
     <div class="foot">
       <button class="btn ghost" data-act="closemodal">${first ? 'Plus tard' : 'Annuler'}</button>
       <button class="btn" id="psOk">Enregistrer</button></div>`);
+  /* photo : recadrée en carré et compressée tout de suite, envoyée à l'enregistrement */
+  let avNew = null, avDrop = false;
+  $('#avFile').addEventListener('change', async () => {
+    const file = $('#avFile').files[0]; $('#avFile').value = ''; if(!file) return;
+    $('#psErr').textContent = ''; $('#avPick').textContent = '⏳ Préparation…';
+    try{
+      if(!/^image\//.test(file.type || 'image/')) throw new Error('Ce fichier n’est pas une image');
+      const blob = await shrinkPhoto(file, 256, true);
+      if(!$('#avPrev')) return;                      // fenêtre fermée pendant la préparation
+      avNew = blob; avDrop = false;
+      const pv = $('#avPrev'); pv.classList.remove('ph-wait', 'ph-gone');
+      pv.innerHTML = `<img src="${URL.createObjectURL(avNew)}" alt="">`;
+      $('#avDel').hidden = false;
+    }catch(e){ if(!$('#psErr')) return; $('#psErr').textContent = e.message + '.'; }
+    $('#avPick').textContent = '📷 ' + (avNew || (curAv && !avDrop) ? 'Changer la photo' : 'Ajouter une photo');
+  });
+  $('#avDel').addEventListener('click', () => {
+    avNew = null; avDrop = !!curAv;
+    $('#avPrev').classList.remove('ph-wait', 'ph-gone'); $('#avPrev').innerHTML = AVATAR_ICON;
+    $('#avDel').hidden = true; $('#avPick').textContent = '📷 Ajouter une photo';
+  });
   const go = async ()=>{
     const v = $('#psIn').value.trim().replace(/\s+/g, ' ');
     if(v && (v.length < 3 || v.length > 20)){ $('#psErr').textContent = 'Le pseudo doit faire entre 3 et 20 caractères.'; return; }
     if(v && !/^[A-Za-z0-9À-ÖØ-öø-ÿ][A-Za-z0-9À-ÖØ-öø-ÿ ._-]*$/.test(v)){ $('#psErr').textContent = 'Lettres, chiffres, espaces, points, tirets et _ uniquement.'; return; }
-    if(!v && !cur){ closeModal(); return; }
+    if(v === cur && !avNew && !avDrop){ closeModal(); return; }
     $('#psOk').disabled = true; $('#psErr').textContent = '';
+    let uploaded = '';
     try{
-      const saved = await db('rpc/definir_pseudo', { method:'POST', body:JSON.stringify({ p:v }) });
+      if(avNew){
+        uploaded = hexOf(auth.email) + '/' + uid() + (avNew.type === 'image/webp' ? '.webp' : '.jpg');
+        $('#psOk').textContent = 'Envoi de la photo…';
+        await photos.upload(uploaded, avNew, 'avatars');
+        await db('rpc/definir_avatar', { method:'POST', body:JSON.stringify({ p:uploaded }) });
+        uploaded = '';                                            // enregistrée
+      } else if(avDrop) await db('rpc/definir_avatar', { method:'POST', body:JSON.stringify({ p:'' }) });
+      let saved = cur;
+      if(v !== cur) saved = await db('rpc/definir_pseudo', { method:'POST', body:JSON.stringify({ p:v }) });
       people.map = Object.assign({}, people.map);
       if(saved) people.map[auth.email] = String(saved); else delete people.map[auth.email];
-      closeModal(); render();
-      toast(saved ? 'Pseudo enregistré : ' + saved : 'Pseudo retiré');
+      closeModal();
+      await people.reloadMine(avNew || avDrop ? curAv : '');
+      render();
+      toast(avNew || avDrop ? (v !== cur ? 'Profil enregistré' : avNew ? 'Photo de profil enregistrée' : 'Photo de profil retirée')
+                            : saved ? 'Pseudo enregistré : ' + saved : 'Pseudo retiré');
     }catch(e){
-      $('#psOk').disabled = false;
-      $('#psErr').textContent = /schema cache|does not exist|Could not find/i.test(e.message)
+      if(uploaded) photos.remove([uploaded], 'avatars');
+      $('#psOk').disabled = false; $('#psOk').textContent = 'Enregistrer';
+      $('#psErr').textContent = /schema cache|does not exist|Could not find|Bucket not found/i.test(e.message)
         ? 'La base Supabase n’est pas à jour : exécute le script supabase_setup.sql dans Supabase (SQL Editor).'
         : e.message + (/[.!]$/.test(e.message) ? '' : '.');
     }
@@ -1386,8 +1485,8 @@ function openPseudo(first){
   $('#psOk').addEventListener('click', go);
   $('#psIn').addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); go(); } });
   $('#psIn').addEventListener('input', () => { $('#psErr').textContent = ''; });
-  setTimeout(() => $('#psIn').focus(), 50);
 }
+const AVATAR_ICON = '<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>';
 
 const friends = {
   list: [], last: 0,                          // list : [{ email, etat : 'ami' | 'recue' | 'envoyee' }]
@@ -1431,12 +1530,12 @@ function paintFriends(){
     return l.length ? `<small class="frhome">🏠 membre de ${l.length > 1 ? 'tes foyers' : 'ton foyer'} ${l.map(esc).join(', ')} · recettes déjà partagées</small>` : ''; };
   b.innerHTML = `
     ${recues.length ? `<label class="f">Demandes reçues</label>${box(recues.map(f => `
-      <div class="shopitem"><div class="txt">${whoHtml(f.email)}<small>veut devenir ton ami·e</small>${common(f)}</div>
+      <div class="shopitem">${avatarOf(f.email)}<div class="txt">${whoHtml(f.email)}<small>veut devenir ton ami·e</small>${common(f)}</div>
         <span class="frbtns"><button class="btn sm" data-act="fraccept" data-email="${esc(f.email)}">Accepter</button>
         <button class="btn line sm" data-act="frrefuse" data-email="${esc(f.email)}">Refuser</button></span></div>`).join(''))}` : ''}
     <label class="f">Mes amis</label>
     ${amis.length ? box(amis.map(f => `
-      <div class="shopitem"><div class="txt">${whoHtml(f.email)}${common(f)}</div>
+      <div class="shopitem">${avatarOf(f.email)}<div class="txt">${whoHtml(f.email)}${common(f)}</div>
         <button class="x" data-act="frremove" data-kind="ami" data-email="${esc(f.email)}" aria-label="Retirer de mes amis">×</button></div>`).join(''))
       : '<div class="empty" style="padding:14px">Pas encore d’ami. Ajoute quelqu’un avec son adresse e-mail.</div>'}
     <label class="f">Ajouter un ami</label>
@@ -1447,7 +1546,7 @@ function paintFriends(){
     <div class="err" id="frErr"></div>
     <div class="muted">La personne verra ta demande dans l’app en se connectant avec cette adresse (aucun e-mail n’est envoyé).</div>
     ${env.length ? `<label class="f">Demandes envoyées</label>${box(env.map(f => `
-      <div class="shopitem"><div class="txt">${whoHtml(f.email)}<small>en attente de réponse</small>${common(f)}</div>
+      <div class="shopitem">${avatarOf(f.email)}<div class="txt">${whoHtml(f.email)}<small>en attente de réponse</small>${common(f)}</div>
         <button class="btn line sm" data-act="frremove" data-kind="envoyee" data-email="${esc(f.email)}">Annuler</button></div>`).join(''))}` : ''}`;
   const send = async ()=>{
     const mail = $('#frEmail').value.trim().toLowerCase();
@@ -1546,11 +1645,14 @@ async function openFriendRecipes(){
     $('#frList').innerHTML = !shown.length
       ? `<div class="empty">${friends.list.some(f => f.etat === 'ami') ? (frCache.length ? 'Tes amis n’ont pas d’autres recettes que les tiennes.' : 'Tes amis n’ont pas encore de recettes.') : 'Tu n’as pas encore d’amis.<br><span class="muted">Ajoute-en depuis le menu en haut à droite (👥 Amis).</span>'}</div>`
       : !list.length ? '<div class="empty">Aucune recette ne correspond.</div>'
-      : list.map(x => `<div class="rec" style="margin-bottom:8px" data-act="frrec" data-i="${x.i}">
+      : list.map(x => `<div class="rec${hasPhoto(x.r) ? ' has-ph' : ''}" style="margin-bottom:8px" data-act="frrec" data-i="${x.i}">
+          ${hasPhoto(x.r) ? `<span class="rec-ph ph-wait" data-photo-box><img data-photo="${esc(x.r.photo.t)}" alt=""></span>` : ''}
+          <div class="rec-b">
           <h3>${esc(x.r.name)}</h3>
           <div class="meta"><span>👤 ${esc(whoText(x.ami))}</span>${Number(x.r.duration) > 0 ? `<span>⏱ ${Number(x.r.duration)} min</span>` : ''}
             ${x.copy === 'mine-changed' ? '<span class="pill">✏️ ta recette, modifiée</span>' : x.copy === 'changed' ? '<span class="pill">✏️ version modifiée</span>' : ''}
             ${importedFrom(x.ami, x.r.id) ? '<span class="pill">✓ déjà importée</span>' : ''}</div>
+          </div>
         </div>`).join('');
   };
   $('#frQ').addEventListener('input', paint);
@@ -1614,7 +1716,7 @@ function toggleMenu(){
     <div class="menu-sep"></div>
     ${cloud.foyer ? `<button class="menu-i" data-act="foyer"><span class="menu-ck">⚙</span><span class="menu-t">Membres &amp; réglages</span></button>` : ''}
     <button class="menu-i" data-act="ingredients"><span class="menu-ck">🥕</span><span class="menu-t">Ingrédients</span>${ingUnknown().length ? `<span class="menu-badge">${ingUnknown().length}</span>` : ''}</button>
-    ${people.ok ? `<button class="menu-i" data-act="pseudo"><span class="menu-ck">🙂</span><span class="menu-t">Mon pseudo</span></button>` : ''}
+    ${people.ok ? `<button class="menu-i" data-act="pseudo"><span class="menu-ck">🙂</span><span class="menu-t">Mon profil</span></button>` : ''}
     <button class="menu-i" data-act="friends"><span class="menu-ck">👥</span><span class="menu-t">Amis</span>${friends.pending ? `<span class="menu-badge">${friends.pending}</span>` : ''}</button>
     <button class="menu-i" data-act="logout"><span class="menu-ck">↩</span><span class="menu-t">Se déconnecter</span></button>
     <div class="menu-foot">${people.mine ? `<b>${esc(people.mine)}</b><br>` : ''}${esc(auth.email)}</div>`;
@@ -1761,7 +1863,7 @@ async function openFoyer(){
       <div class="card" style="padding:4px 12px;box-shadow:none;margin:0">
         ${(rows||[]).map(r=>`
           <div class="shopitem">
-            <div class="txt">${whoHtml(r.email)}${r.email===auth.email?' <small>c’est toi</small>':''}</div>
+            ${avatarOf(r.email)}<div class="txt">${whoHtml(r.email)}${r.email===auth.email?' <small>c’est toi</small>':''}</div>
             ${r.email===auth.email ? '' : `<button class="x" data-act="delmembre" data-email="${esc(r.email)}" aria-label="Retirer">×</button>`}
           </div>`).join('')}
       </div>
@@ -1804,7 +1906,7 @@ async function doLogout(){
   await auth.logout();
   localStorage.removeItem(LS_BASE + cloud.foyer);
   cloud.on = false; cloud.foyer = ''; cloud.foyers = []; cloud.pending = false;
-  friends.list = []; frCache = null; friends.paint(); people.map = {}; people.ok = false;
+  friends.list = []; frCache = null; friends.paint(); people.map = {}; people.av = {}; people.ok = false;
   photos.clearCache();
   localStorage.removeItem(LS_FOYER);
   localStorage.removeItem(LS);
@@ -2036,7 +2138,9 @@ function renderRecipes(){
   $('#recList').innerHTML = harm + (list.length ? list.map(r=>{
     const ing = (r.ingredients||[]).length;
     const tags = (r.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('');
-    return `<div class="rec" data-act="openrec" data-id="${r.id}">
+    return `<div class="rec${hasPhoto(r) ? ' has-ph' : ''}" data-act="openrec" data-id="${r.id}">
+      ${hasPhoto(r) ? `<span class="rec-ph ph-wait" data-photo-box><img data-photo="${esc(r.photo.t)}" alt=""></span>` : ''}
+      <div class="rec-b">
       <h3>${esc(r.name)}</h3>
       <div class="meta">
         <span>⏱ ${r.duration} min</span>
@@ -2047,6 +2151,7 @@ function renderRecipes(){
       </div>
       ${tags?`<div class="tags" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:7px">${tags}</div>`:''}
       ${ing?`<div class="ing">${esc((r.ingredients||[]).map(i=>i.name + ((i.qty||i.unit) ? ' ('+qtyLabel(i.qty,i.unit)+')' : '')).join(' · '))}</div>`:''}
+      </div>
     </div>`;
   }).join('') : `<div class="empty">Aucune recette ${q||filterTag?'ne correspond à ce filtre':'pour l’instant'}.<br><span class="muted">Ajoute ta première recette avec le bouton ci-dessus.</span></div>`);
 }
@@ -2312,17 +2417,17 @@ const photos = {
     if(!r.ok){ const j = await r.json().catch(() => ({})); throw Object.assign(new Error(j.message || j.error || ('HTTP ' + r.status)), { status:r.status }); }
     return r;
   },
-  key: p => SUPABASE_URL + '/storage/v1/object/authenticated/photos/' + p,
-  async upload(p, blob){
-    await this.req('object/photos/' + p, { method:'POST', body:blob,
+  key: (p, b = 'photos') => SUPABASE_URL + '/storage/v1/object/authenticated/' + b + '/' + p,
+  async upload(p, blob, b = 'photos'){
+    await this.req('object/' + b + '/' + p, { method:'POST', body:blob,
       headers:{ 'Content-Type':blob.type, 'x-upsert':'true', 'cache-control':'max-age=31536000' } });
-    try{ (await caches.open(PHOTO_CACHE)).put(this.key(p), new Response(blob, { headers:{ 'Content-Type':blob.type } })); }catch(e){}
+    try{ (await caches.open(PHOTO_CACHE)).put(this.key(p, b), new Response(blob, { headers:{ 'Content-Type':blob.type } })); }catch(e){}
   },
-  async remove(paths){
+  async remove(paths, b = 'photos'){
     paths = paths.filter(photoPathOk); if(!paths.length) return;
     try{
-      await this.req('object/photos', { method:'DELETE', body:JSON.stringify({ prefixes:paths }), headers:{ 'Content-Type':'application/json' } });
-      const c = await caches.open(PHOTO_CACHE); paths.forEach(p => c.delete(this.key(p)));
+      await this.req('object/' + b, { method:'DELETE', body:JSON.stringify({ prefixes:paths }), headers:{ 'Content-Type':'application/json' } });
+      const c = await caches.open(PHOTO_CACHE); paths.forEach(p => c.delete(this.key(p, b)));
     }catch(e){}                                      // au pire, un fichier orphelin
   },
   async copy(from, to){
@@ -2338,27 +2443,28 @@ const photos = {
     catch(e){ this.remove([out.f, out.t]); return null; }
   },
   /* adresse affichable : mémoire → cache de l'appareil → serveur */
-  url(p){
-    if(this.urls.has(p)) return Promise.resolve(this.urls.get(p));
-    if(this.pending.has(p)) return this.pending.get(p);
+  url(p, b = 'photos'){
+    const id = b + '/' + p;
+    if(this.urls.has(id)) return Promise.resolve(this.urls.get(id));
+    if(this.pending.has(id)) return this.pending.get(id);
     const job = (async () => {
       let blob = null, c = null;
-      try{ c = await caches.open(PHOTO_CACHE); const hit = await c.match(this.key(p)); if(hit) blob = await hit.blob(); }catch(e){}
+      try{ c = await caches.open(PHOTO_CACHE); const hit = await c.match(this.key(p, b)); if(hit) blob = await hit.blob(); }catch(e){}
       if(!blob){
-        const r = await this.req('object/authenticated/photos/' + p);
+        const r = await this.req('object/authenticated/' + b + '/' + p);
         blob = await r.blob();
-        try{ if(c) await c.put(this.key(p), new Response(blob, { headers:{ 'Content-Type':blob.type || 'image/webp' } })); }catch(e){}
+        try{ if(c) await c.put(this.key(p, b), new Response(blob, { headers:{ 'Content-Type':blob.type || 'image/webp' } })); }catch(e){}
       }
-      const u = URL.createObjectURL(blob); this.urls.set(p, u); return u;
-    })().finally(() => this.pending.delete(p));
-    this.pending.set(p, job);
+      const u = URL.createObjectURL(blob); this.urls.set(id, u); return u;
+    })().finally(() => this.pending.delete(id));
+    this.pending.set(id, job);
     return job;
   },
   /* remplit les <img data-photo="chemin"> ajoutées à la page */
   fill(img){
     const p = img.dataset.photo; if(!photoPathOk(p) || img.dataset.filled) return;
     img.dataset.filled = '1';
-    this.url(p).then(u => { img.src = u; img.closest('.ph-wait')?.classList.remove('ph-wait'); })
+    this.url(p, img.dataset.bucket === 'avatars' ? 'avatars' : 'photos').then(u => { img.src = u; img.closest('.ph-wait')?.classList.remove('ph-wait'); })
       .catch(() => { const box = img.closest('[data-photo-box]'); (box || img).classList.add('ph-gone'); });
   },
   async clearCache(){ this.urls.forEach(u => URL.revokeObjectURL(u)); this.urls.clear(); try{ await caches.delete(PHOTO_CACHE); }catch(e){} }
@@ -3030,11 +3136,13 @@ function openRecipeForm(id, opts = {}){
     const file = $('#phFile').files[0]; $('#phFile').value = ''; if(!file) return;
     $('#phErr').textContent = ''; $('#phPick').textContent = '⏳ Préparation…';
     try{
-      phNew = await preparePhoto(file); phDrop = false;
+      const prep = await preparePhoto(file);
+      if(!$('#phPrev')) return;                      // formulaire fermé pendant la préparation
+      phNew = prep; phDrop = false;
       const prev = $('#phPrev'); prev.hidden = false; prev.classList.remove('ph-wait', 'ph-gone');
       prev.innerHTML = `<img src="${URL.createObjectURL(phNew.f)}" alt="">`;
       $('#phDel').hidden = false;
-    }catch(e){ $('#phErr').textContent = e.message + '.'; }
+    }catch(e){ if(!$('#phErr')) return; $('#phErr').textContent = e.message + '.'; }
     $('#phPick').textContent = '📷 ' + (phNew || (hasPhoto(r) && !phDrop) ? 'Changer la photo' : 'Ajouter une photo');
   });
   if($('#phDel')) $('#phDel').addEventListener('click', () => {
@@ -3358,7 +3466,7 @@ document.addEventListener('click', e=>{
     case 'import': doImport(t.dataset.mode); break;
     case 'friends': openFriends(); break;
     case 'photozoom': openLightbox(t.dataset.path); break;
-    case 'pseudo': openPseudo(false); break;
+    case 'pseudo': openProfile(false); break;
     case 'fraccept': case 'frrefuse': case 'frremove': friendAction(t); break;
     case 'frrec': openFriendRecipe(Number(t.dataset.i)); break;
     case 'frback': openFriendRecipes(); break;
