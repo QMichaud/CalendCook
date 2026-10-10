@@ -357,6 +357,57 @@ revoke execute on function public.pseudos_connus()     from anon, public;
 grant  execute on function public.definir_pseudo(text) to authenticated;
 grant  execute on function public.pseudos_connus()     to authenticated;
 
+-- 6 quinquies) Photos des recettes (Supabase Storage, dossier privé « photos »)
+--    Un dossier par foyer, nommé d'après le nom du foyer en hexadécimal (les noms de fichiers
+--    n'acceptent pas tous les caractères). Les photos sont compressées dans le téléphone avant l'envoi.
+--    Membres du foyer : lire, ajouter, remplacer, supprimer. Amis d'un membre : lire seulement.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('photos', 'photos', false, 2097152, array['image/webp', 'image/jpeg'])
+on conflict (id) do update set public = false, file_size_limit = excluded.file_size_limit,
+                               allowed_mime_types = excluded.allowed_mime_types;
+
+create or replace function public.photo_dossier_membre(dossier text)
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  select exists (
+    select 1 from public.foyer_membres
+     where email = lower(auth.jwt() ->> 'email')
+       and encode(convert_to(foyer_id, 'UTF8'), 'hex') = dossier
+  );
+$$;
+create or replace function public.photo_dossier_lisible(dossier text)
+returns boolean
+language sql stable security definer set search_path = public
+as $$
+  with m as (select lower(auth.jwt() ->> 'email') as e)
+  select public.photo_dossier_membre(dossier) or exists (
+    select 1
+      from public.demandes_amis d
+      join m on d.statut = 'accepte' and (d.de = m.e or d.a = m.e)
+      join public.foyer_membres fm on fm.email = case when d.de = m.e then d.a else d.de end
+     where encode(convert_to(fm.foyer_id, 'UTF8'), 'hex') = dossier
+  );
+$$;
+revoke execute on function public.photo_dossier_membre(text)  from anon, public;
+revoke execute on function public.photo_dossier_lisible(text) from anon, public;
+grant  execute on function public.photo_dossier_membre(text)  to authenticated;
+grant  execute on function public.photo_dossier_lisible(text) to authenticated;
+
+drop policy if exists "photos lecture"     on storage.objects;
+drop policy if exists "photos ajout"       on storage.objects;
+drop policy if exists "photos remplacement" on storage.objects;
+drop policy if exists "photos suppression" on storage.objects;
+create policy "photos lecture" on storage.objects for select to authenticated
+  using (bucket_id = 'photos' and public.photo_dossier_lisible((storage.foldername(name))[1]));
+create policy "photos ajout" on storage.objects for insert to authenticated
+  with check (bucket_id = 'photos' and public.photo_dossier_membre((storage.foldername(name))[1]));
+create policy "photos remplacement" on storage.objects for update to authenticated
+  using (bucket_id = 'photos' and public.photo_dossier_membre((storage.foldername(name))[1]))
+  with check (bucket_id = 'photos' and public.photo_dossier_membre((storage.foldername(name))[1]));
+create policy "photos suppression" on storage.objects for delete to authenticated
+  using (bucket_id = 'photos' and public.photo_dossier_membre((storage.foldername(name))[1]));
+
 -- 7) Recharge le cache de l'API pour que l'app voie tout de suite les fonctions
 notify pgrst, 'reload schema';
 
