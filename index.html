@@ -792,7 +792,7 @@
 
 <div class="modal" id="modal"><div class="sheet" id="sheet"></div></div>
 <div class="ask" id="ask" hidden><div class="ask-box" role="alertdialog" aria-labelledby="askT">
-  <p id="askT">Vos modifications n’ont pas été enregistrées. Voulez-vous enregistrer avant de quitter&nbsp;?</p>
+  <p id="askT">Tes modifications n’ont pas été enregistrées. Veux-tu enregistrer avant de quitter&nbsp;?</p>
   <div class="ask-btns"><button class="btn ghost" data-act="askquit">Quitter sans enregistrer</button><button class="btn" data-act="asksave">Enregistrer</button></div>
 </div></div>
 <div id="toast"></div>
@@ -2392,7 +2392,6 @@ function closeModal(){
   document.body.style.overflow = '';
 }
 $('#modal').addEventListener('click', e => { if(e.target.id === 'modal') dismissModal(); });
-$('#ask').addEventListener('click', e => { if(e.target.id === 'ask') $('#ask').hidden = true; });   // à côté : on reste sur le formulaire
 
 /* ---- fermer une fenêtre en la faisant glisser vers le bas ----
    depuis la poignée / le haut de la fenêtre, ou n'importe où quand son
