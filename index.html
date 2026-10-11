@@ -498,6 +498,12 @@
   .sheet{overscroll-behavior:contain;touch-action:pan-y}
   .sheet.dragging{transition:none!important;animation:none}
   .sheet.settle{transition:transform .22s cubic-bezier(.2,.8,.3,1)}
+  .ask{position:fixed;inset:0;z-index:70;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(39,50,74,.32);animation:fade .15s ease}
+  .ask[hidden]{display:none}
+  .ask-box{width:100%;max-width:360px;background:var(--sheet);border-radius:var(--radius);border-top:3px double rgba(201,83,76,.55);box-shadow:0 12px 32px rgba(39,50,74,.25);padding:18px 16px 16px}
+  .ask-box p{margin:0 0 16px;font-size:15.5px;line-height:1.45;font-weight:600}
+  .ask-btns{display:flex;gap:9px}
+  .ask-btns .btn{flex:1;padding-left:8px;padding-right:8px}
   .slotday.has{border-color:var(--hl-line)}
   .slotday.has .pill{background:var(--hl-soft);color:var(--ink)}
   /* créneau déjà au menu : même jaune « post-it » que les plats du calendrier */
@@ -785,6 +791,10 @@
 </nav>
 
 <div class="modal" id="modal"><div class="sheet" id="sheet"></div></div>
+<div class="ask" id="ask" hidden><div class="ask-box" role="alertdialog" aria-labelledby="askT">
+  <p id="askT">Vos modifications n’ont pas été enregistrées. Voulez-vous enregistrer avant de quitter&nbsp;?</p>
+  <div class="ask-btns"><button class="btn ghost" data-act="askquit">Quitter sans enregistrer</button><button class="btn" data-act="asksave">Enregistrer</button></div>
+</div></div>
 <div id="toast"></div>
 <div id="majBar" hidden>
   <span>✨ Nouvelle version de l’app disponible</span>
@@ -2361,7 +2371,14 @@ function render(){
 /* ============================================================
    MODALES
    ============================================================ */
+/* modalGuard : posé par une fenêtre à protéger (formulaire de recette) ; renvoie true s'il y a
+   des modifications non enregistrées. Seules les fermetures « implicites » (glisser vers le bas,
+   toucher à côté) demandent confirmation : Annuler et Enregistrer ferment directement. */
+let modalGuard = null;
+function dismissModal(){ if(modalGuard && modalGuard()) askUnsaved(); else closeModal(); }
+function askUnsaved(){ $('#ask').hidden = false; }
 function openModal(html){
+  modalGuard = null; $('#ask').hidden = true;
   const sh = $('#sheet');
   sh.classList.remove('dragging','settle'); sh.style.transform = ''; $('#modal').style.background = '';
   sh.innerHTML = '<div class="grab"></div>' + html;
@@ -2369,11 +2386,13 @@ function openModal(html){
   document.body.style.overflow = 'hidden';
 }
 function closeModal(){
+  modalGuard = null; $('#ask').hidden = true;
   $('#modal').classList.remove('on');
   $('#sheet').innerHTML = '';
   document.body.style.overflow = '';
 }
-$('#modal').addEventListener('click', e => { if(e.target.id === 'modal') closeModal(); });
+$('#modal').addEventListener('click', e => { if(e.target.id === 'modal') dismissModal(); });
+$('#ask').addEventListener('click', e => { if(e.target.id === 'ask') $('#ask').hidden = true; });   // à côté : on reste sur le formulaire
 
 /* ---- fermer une fenêtre en la faisant glisser vers le bas ----
    depuis la poignée / le haut de la fenêtre, ou n'importe où quand son
@@ -2413,7 +2432,12 @@ $('#modal').addEventListener('click', e => { if(e.target.id === 'modal') closeMo
     mode = '';
     sh.classList.remove('dragging'); sh.classList.add('settle');
     /* assez tirée vers le bas, ou lâchée avec de l'élan vers le bas */
-    if(dy > Math.min(140, sh.offsetHeight * 0.3) || (dy > 30 && vy > 0.5)){
+    const away = dy > Math.min(140, sh.offsetHeight * 0.3) || (dy > 30 && vy > 0.5);
+    if(away && modalGuard && modalGuard()){            // modifications non enregistrées : la fenêtre revient, on demande
+      sh.style.transform = ''; modal.style.background = '';
+      setTimeout(()=> sh.classList.remove('settle'), 230);
+      askUnsaved();
+    } else if(away){
       sh.style.transform = 'translateY(100%)'; modal.style.background = 'rgba(39,50,74,0)';
       setTimeout(()=>{ closeModal(); sh.classList.remove('settle'); sh.style.transform = ''; modal.style.background = ''; }, 200);
     } else {
@@ -3589,6 +3613,11 @@ function openRecipeForm(id, opts = {}){
     $('#phPick').textContent = '📷 Ajouter une photo';
   });
   const form = $('#recForm');
+  /* modifications non enregistrées : on compare l'état du formulaire à celui de l'ouverture */
+  const formSig = () => JSON.stringify([Array.from(form.querySelectorAll('input:not([type=file]), textarea, select')).map(e => e.type === 'checkbox' ? e.checked : e.value),
+    manual, isPublic, !!phNew, phDrop]);
+  const sig0 = formSig();
+  modalGuard = () => !!$('#recForm') && formSig() !== sig0;
   form.addEventListener('submit', async ev=>{
     ev.preventDefault();
     const submit = form.querySelector('button[type=submit]');
@@ -3890,6 +3919,8 @@ document.addEventListener('click', e=>{
     case 'ftag': filterTag = t.dataset.tag || null; renderRecipes(); break;
     case 'ftagall': filterTag = t.dataset.tag || null; closeModal(); renderRecipes(); window.scrollTo({ top:0 }); break;
     case 'closemodal': closeModal(); break;
+    case 'askquit': closeModal(); break;
+    case 'asksave': $('#ask').hidden = true; if($('#recForm')) $('#recForm').requestSubmit(); break;
     case 'ck': {
       const it = state.shopping.find(x=>x.id===id);
       if(it){ it.done = !it.done; store.save(); renderShop(); }
