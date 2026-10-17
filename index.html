@@ -535,6 +535,15 @@
   #rSteps{min-height:110px;resize:vertical;line-height:1.45}
   .ingrow:last-child{border-bottom:0}
   .ingrow .q{font-weight:800;color:var(--accent-deep);white-space:nowrap}
+  .serv{display:inline-flex;align-items:center;gap:2px;border-radius:16px;background:var(--accent-soft);color:var(--accent-deep);font-size:12.5px;font-weight:800;padding:1px}
+  .serv.chg{background:var(--hl-soft);color:var(--ink)}
+  .serv-t{padding:0 5px;white-space:nowrap}
+  .serv-b{width:30px;height:30px;border-radius:50%;border:1.5px solid var(--line);background:var(--sheet);color:var(--accent-deep);font:inherit;font-size:18px;font-weight:800;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0;flex:none}
+  .serv-b:active{background:var(--accent-soft)}
+  .serv-b:disabled{opacity:.35;cursor:default}
+  .servin{display:flex;align-items:center;gap:6px}
+  .servin input{flex:1;min-width:0;text-align:center}
+  .servin .serv-b{width:38px;height:38px}
 
   /* ---------- Divers ---------- */
   #majBar{
@@ -835,7 +844,38 @@ function qtyLabel(q, u){
   const val = (q === '' || q === null || q === undefined || isNaN(q)) ? '' : q;
   const unit = UNITS.find(x=>x.k === (u||''));
   const short = !u || u === 'pcs' ? '' : (unit ? unit.l : u);
-  return [val, short].filter(Boolean).join(' ');
+  return [String(val).replace('.', ','), short].filter(Boolean).join(' ');
+}
+
+/* ---------- quantités recalculées pour un autre nombre de personnes ----------
+   arrondies pour rester lisibles : à la demi-unité pour ce qui se compte (œufs, gousses,
+   cuillères…), à 2 chiffres significatifs pour les poids et volumes (5 en 5 au-delà de 100) */
+const COUNT_UNITS = new Set(['', 'pcs', 'tranche', 'gousse', 'pincee', 'sachet', 'boite', 'botte', 'cc', 'cs']);
+function scaleQty(q, u, f){
+  const v = Number(q); if(q === '' || q === null || q === undefined || !(v > 0)) return q;   // « selon le goût » : reste vide
+  if(f === 1) return v;
+  let x = v * f;
+  if(COUNT_UNITS.has(u || '')) x = Math.max(0.5, Math.round(x * 2) / 2);
+  else if(x >= 100) x = Math.round(x / 5) * 5;
+  else { const p = Math.pow(10, Math.floor(Math.log10(x)) - 1); x = Math.round(x / p) * p; }
+  return Math.round(x * 1000) / 1000;
+}
+const persLabel = n => n + ' personne' + (n > 1 ? 's' : '');
+/* fiche de consultation : « − 👥 4 personnes + », ne change que l'affichage (rien n'est enregistré) */
+const servStepper = n => `<span class="serv" data-base="${n}" data-n="${n}"><button type="button" class="serv-b" data-act="servstep" data-d="-1" aria-label="Une personne de moins"${n <= 1 ? ' disabled' : ''}>−</button><span class="serv-t">👥 <span class="serv-n">${persLabel(n)}</span></span><button type="button" class="serv-b" data-act="servstep" data-d="1" aria-label="Une personne de plus">+</button></span>`;
+const servFor = n => n > 0 ? ' <small class="sec-sub servfor">pour ' + n + '</small>' : '';
+function ingViewRow(i){
+  const q = Number(i.qty) > 0 ? Number(i.qty) : '', u = UNITS.some(x => x.k === i.unit) ? i.unit : '';
+  return `<div class="ingrow"><span style="flex:1">${esc(i.name)}</span><span class="q" data-q="${q}" data-u="${esc(u)}">${esc(qtyLabel(q, u))}</span></div>`;
+}
+function setServings(box, n){
+  const base = Number(box.dataset.base); n = Math.min(99, Math.max(1, n));
+  box.dataset.n = n; box.classList.toggle('chg', n !== base);
+  box.querySelector('.serv-n').textContent = persLabel(n);
+  box.querySelector('[data-d="-1"]').disabled = n <= 1;
+  const sh = box.closest('#sheet') || document;
+  sh.querySelectorAll('.ingrow .q[data-q]').forEach(e => { e.textContent = qtyLabel(scaleQty(e.dataset.q, e.dataset.u, n / base), e.dataset.u); });
+  const f = sh.querySelector('.servfor'); if(f) f.textContent = 'pour ' + n + (n !== base ? ' (recette pour ' + base + ')' : '');
 }
 
 let state = { recipes:[], plan:{}, shopping:[], eaters:[] };
@@ -1776,18 +1816,18 @@ function openFriendRecipe(i){
   const x = frCache && frCache[i]; if(!x) return;
   const r = x.r, done = importedFrom(x.ami, r.id);
   const ing = (Array.isArray(r.ingredients) ? r.ingredients : []).filter(i => i && i.name)
-    .map(i => `<div class="ingrow"><span style="flex:1">${esc(i.name)}</span><span class="q">${esc(qtyLabel(Number(i.qty) > 0 ? Number(i.qty) : '', UNITS.some(u => u.k === i.unit) ? i.unit : ''))}</span></div>`).join('');
+    .map(ingViewRow).join('');
   openModal(`
     ${hasPhoto(r) ? photoBanner(r.photo) : ''}
     <h2>${esc(r.name)}</h2>
     <div class="origin">👤 Recette de ${whoInline(x.ami)}${{ 'mine-changed':' · version modifiée de ta recette', changed:' · version modifiée' }[friendCopyState(r)] || ''}</div>
     <div class="row" style="gap:8px;margin-bottom:12px;flex-wrap:wrap">
       ${Number(r.duration) > 0 ? `<span class="pill">⏱ ${Number(r.duration)} min</span>` : ''}
-      ${Number(r.servings) > 0 ? `<span class="pill">👥 ${Number(r.servings)} personne${Number(r.servings)>1?'s':''}</span>` : ''}
+      ${Number(r.servings) > 0 ? servStepper(Number(r.servings)) : ''}
     </div>
     ${safeUrl(r.url) ? `<a class="reclink" href="${esc(safeUrl(r.url))}" target="_blank" rel="noopener noreferrer">
       <span class="reclink-i">🔗</span><span class="reclink-t"><b>Voir la recette en ligne</b><small>${esc(siteOf(safeUrl(r.url)))}</small></span><span class="reclink-a">↗</span></a>` : ''}
-    <h2 class="sec">Ingrédients${Number(r.servings) > 0 ? ' <small class="sec-sub">pour ' + Number(r.servings) + '</small>' : ''}</h2>
+    <h2 class="sec">Ingrédients${servFor(Number(r.servings))}</h2>
     ${ing || '<div class="muted">Aucun ingrédient renseigné.</div>'}
     ${stepsHtml(typeof r.steps === 'string' ? r.steps : '')}
     <div class="foot">
@@ -2646,7 +2686,7 @@ const stepsHtml = t => { const l = stepList(t);
   return l.length ? `<h2 class="sec">Préparation</h2><ol class="steps">${l.map(x => `<li><span>${esc(x)}</span></li>`).join('')}</ol>` : ''; };
 function openRecipe(id){
   const r = findRecipe(id); if(!r) return;
-  const ing = (r.ingredients||[]).map(i=>`<div class="ingrow"><span style="flex:1">${esc(i.name)}</span><span class="q">${esc(qtyLabel(i.qty,i.unit))}</span></div>`).join('');
+  const ing = (r.ingredients||[]).map(ingViewRow).join('');
   openModal(`
     ${hasPhoto(r) ? photoBanner(r.photo) : ''}
     <div class="rtitle"><h2>${esc(r.name)}</h2>
@@ -2659,7 +2699,7 @@ function openRecipe(id){
         </div></div></div>
     <div class="row" style="gap:8px;margin-bottom:12px">
       <span class="pill">⏱ ${r.duration} min</span>
-      ${r.servings ? `<span class="pill">👥 ${r.servings} personne${r.servings>1?'s':''}</span>` : ''}
+      ${Number(r.servings) > 0 ? servStepper(Number(r.servings)) : ''}
       ${(r.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}
       ${seasonPills(recipeSeasons(r))}
     </div>
@@ -2668,7 +2708,7 @@ function openRecipe(id){
       : r.origin && r.origin.pub ? `<div class="origin">📥 Importée depuis les recettes publiques de <b>${esc(r.origin.pseudo || 'un cuisinier')}</b></div>` : ''}
     ${safeUrl(r.url) ? `<a class="reclink" href="${esc(safeUrl(r.url))}" target="_blank" rel="noopener noreferrer">
       <span class="reclink-i">🔗</span><span class="reclink-t"><b>Voir la recette en ligne</b><small>${esc(siteOf(safeUrl(r.url)))}</small></span><span class="reclink-a">↗</span></a>` : ''}
-    <h2 class="sec">Ingrédients${r.servings ? ' <small class="sec-sub">pour ' + r.servings + '</small>' : ''}</h2>
+    <h2 class="sec">Ingrédients${servFor(Number(r.servings))}</h2>
     ${ing || '<div class="muted">Aucun ingrédient renseigné.</div>'}
     ${stepsHtml(r.steps)}
   `);
@@ -3378,14 +3418,14 @@ function openPubRecipe(pid){
       ${x.nb_imports ? `<span class="pill">📥 ${x.nb_imports} import${x.nb_imports > 1 ? 's' : ''}</span>` : ''}</div>
     <div class="row" style="gap:6px;margin:8px 0 12px;flex-wrap:wrap">
       ${Number(r.duration) > 0 ? `<span class="pill">⏱ ${Number(r.duration)} min</span>` : ''}
-      ${Number(r.servings) > 0 ? `<span class="pill">👥 ${Number(r.servings)} personne${Number(r.servings) > 1 ? 's' : ''}</span>` : ''}
+      ${Number(r.servings) > 0 ? servStepper(Number(r.servings)) : ''}
       ${seasonPills(x.saisons)}</div>
     ${x.mienne ? '' : `<div class="mynote"><span>Ta note</span><span class="pick">${[1,2,3,4,5].map(n => `<button class="st${x.ma_note >= n ? ' on' : ''}" data-act="pubrate" data-pid="${esc(pid)}" data-n="${n}" aria-label="${n} étoile${n > 1 ? 's' : ''}">★</button>`).join('')}</span>
       <small>${x.ma_note ? `Tu as mis ${x.ma_note}/5 · <button class="linkbtn" data-act="pubrate" data-pid="${esc(pid)}" data-n="0">retirer ma note</button>` : 'Touche une étoile pour noter'}</small></div>`}
     ${safeUrl(r.url) ? `<a class="reclink" href="${esc(safeUrl(r.url))}" target="_blank" rel="noopener noreferrer">
       <span class="reclink-i">🔗</span><span class="reclink-t"><b>Voir la recette en ligne</b><small>${esc(siteOf(safeUrl(r.url)))}</small></span><span class="reclink-a">↗</span></a>` : ''}
-    <h2 class="sec">Ingrédients${Number(r.servings) > 0 ? ' <small class="sec-sub">pour ' + Number(r.servings) + '</small>' : ''}</h2>
-    ${ings.map(i => `<div class="ingrow"><span style="flex:1">${esc(i.name)}</span><span class="q">${esc(qtyLabel(Number(i.qty) > 0 ? Number(i.qty) : '', UNITS.some(u => u.k === i.unit) ? i.unit : ''))}</span></div>`).join('') || '<div class="muted">Aucun ingrédient renseigné.</div>'}
+    <h2 class="sec">Ingrédients${servFor(Number(r.servings))}</h2>
+    ${ings.map(ingViewRow).join('') || '<div class="muted">Aucun ingrédient renseigné.</div>'}
     ${stepsHtml(typeof r.steps === 'string' ? r.steps : '')}
     <div class="foot">
       <button class="btn ghost" style="flex:1" data-act="closemodal">‹ Retour</button>
@@ -3449,7 +3489,7 @@ function openRecipeForm(id, opts = {}){
         </div>
         <div>
           <label class="f">Pour (personnes)</label>
-          <input type="number" id="rServ" min="1" step="1" inputmode="numeric" value="${r&&r.servings?r.servings:''}" placeholder="4">
+          <div class="servin"><button type="button" class="serv-b" id="rServM" aria-label="Une personne de moins">−</button><input type="number" id="rServ" min="1" step="1" inputmode="numeric" value="${r&&r.servings?r.servings:''}" placeholder="4"><button type="button" class="serv-b" id="rServP" aria-label="Une personne de plus">+</button></div>
         </div>
       </div>
 
@@ -3582,10 +3622,31 @@ function openRecipeForm(id, opts = {}){
   wrap.addEventListener('change', e=>{
     if(e.target.classList.contains('i-unit')) e.target.closest('.ingline').dataset.touched = '1';
   });
-  $('#rServ').addEventListener('input', ()=>{
+  const paintIngFor = (scaled) => {
     const n = parseInt($('#rServ').value, 10);
-    $('#ingFor').textContent = n > 0 ? 'Quantités pour ' + n + ' personne' + (n>1?'s':'') : 'Quantités pour le nombre de personnes indiqué ci-dessus';
-  });
+    $('#ingFor').textContent = n > 0 ? 'Quantités pour ' + persLabel(n) + (scaled ? ' (recalculées)' : '') : 'Quantités pour le nombre de personnes indiqué ci-dessus';
+  };
+  $('#rServ').addEventListener('input', () => paintIngFor(false));
+  /* − / + : change le nombre de personnes ET recalcule les quantités. Les quantités de départ
+     sont gardées tant qu'on enchaîne les − / + (pas d'arrondis qui s'accumulent) ; toute saisie
+     à la main repart de ce qui est affiché. Taper directement un nombre ne recalcule rien
+     (utile pour corriger un nombre de personnes mal saisi). */
+  let servBase = null;
+  $('#recForm').addEventListener('input', e => { if(e.isTrusted) servBase = null; });
+  const stepServ = d => {
+    const n0 = parseInt($('#rServ').value, 10);
+    if(!(n0 > 0)){ if(d > 0){ $('#rServ').value = 1; paintIngFor(false); } return; }   // pas encore de nombre : rien à recalculer
+    const n = Math.min(99, Math.max(1, n0 + d)); if(n === n0) return;
+    if(!servBase) servBase = { n:n0, q:new Map($$('#ingWrap .ingline').map(l => [l, l.querySelector('.i-qty').value])) };
+    $$('#ingWrap .ingline').forEach(l => {
+      if(!servBase.q.has(l)) servBase.q.set(l, l.querySelector('.i-qty').value);
+      const q0 = servBase.q.get(l); if(q0 === '') return;
+      l.querySelector('.i-qty').value = scaleQty(Number(q0), l.querySelector('.i-unit').value, n / servBase.n);
+    });
+    $('#rServ').value = n; paintIngFor(true);
+  };
+  $('#rServM').addEventListener('click', () => stepServ(-1));
+  $('#rServP').addEventListener('click', () => stepServ(1));
   /* Annuler : retour à la liste du créneau si on venait du calendrier */
   $('#rCancel').addEventListener('click', ()=> opts.plan ? openPicker(opts.plan.dateKey, opts.plan.slot) : closeModal());
   if(!r && opts.name) $('#rName').value = opts.name;
@@ -3918,6 +3979,7 @@ document.addEventListener('click', e=>{
     case 'ftag': filterTag = t.dataset.tag || null; renderRecipes(); break;
     case 'ftagall': filterTag = t.dataset.tag || null; closeModal(); renderRecipes(); window.scrollTo({ top:0 }); break;
     case 'closemodal': closeModal(); break;
+    case 'servstep': { const box = t.closest('.serv'); setServings(box, Number(box.dataset.n) + Number(t.dataset.d)); break; }
     case 'askquit': closeModal(); break;
     case 'asksave': $('#ask').hidden = true; if($('#recForm')) $('#recForm').requestSubmit(); break;
     case 'ck': {
