@@ -421,6 +421,18 @@
   .ingline select{padding:10px 4px;text-align:center}
   .ingline .x{width:32px;height:32px}
   .i-name.bad,.harm-in.bad{border-color:var(--red);box-shadow:0 0 0 3px rgba(200,70,60,.12)}
+  .i-name.approx{border-color:#D99A2B;box-shadow:0 0 0 3px rgba(217,154,43,.15)}
+  .impbox{margin:4px 0 6px;padding:11px 12px;border-radius:12px;background:var(--accent-soft);border:1.5px dashed rgba(47,93,168,.3)}
+  .impbox-t{font-weight:800;font-size:14px;color:var(--accent-deep);margin-bottom:8px}
+  .impbox-t small{font-weight:600;color:var(--ink-soft);font-size:12px;margin-left:4px}
+  .impbox input{flex:1;min-width:0}
+  .iumsg{font-size:13px;margin-top:6px;line-height:1.4}
+  .iumsg:empty{display:none}
+  .iumsg.ok{color:var(--accent-deep)}
+  .iumsg.err{color:var(--red);font-weight:700}
+  .iuorig{margin-top:8px;font-size:13px;color:var(--ink-soft)}
+  .iuorig summary{cursor:pointer;font-weight:700}
+  .iuorig ul{margin:6px 0 0;padding-left:18px}
   .ingdrop{margin:-2px 0 9px;background:var(--sheet);border:1.5px solid var(--accent);border-radius:10px;padding:4px;
     box-shadow:0 6px 18px rgba(30,40,70,.12);max-height:260px;overflow-y:auto}
   .ingopt{display:flex;align-items:baseline;gap:8px;width:100%;text-align:left;background:none;border:0;border-radius:7px;
@@ -2830,6 +2842,89 @@ function ingFind(name){
   if(same) return same.name;
   return !hasAccent(name) && c.length === 1 ? c[0].name : null;
 }
+/* ---------- import depuis un site : une ligne d'ingrédient en texte → { name, qty, unit } ----------
+   « 200 g de lardons fumés » → Lardon / 200 / g ; « 1 gousse d'ail » → Ail / 1 / gousse ;
+   « Sel, poivre » → deux lignes sans quantité. ok : ingrédient trouvé dans la liste. */
+const IMP_UNITS = [
+  [/^(?:kg|kilos?|kilogrammes?)\b\.?/, 'kg', 1], [/^(?:g|gr|grs|grammes?)\b\.?/, 'g', 1], [/^mg\b/, 'g', 0.001],
+  [/^(?:ml|millilitres?)\b/, 'ml', 1], [/^(?:cl|centilitres?)\b/, 'cl', 1], [/^(?:dl|décilitres?|decilitres?)\b/, 'cl', 10],
+  [/^(?:l|litres?)\b/, 'l', 1],
+  [/^(?:c\.?\s*(?:à|a)\s*soupe|c\.?\s*à\s*s\.?|c\.?\s*a\s*s\.?|cs|càs|cas|cuil(?:l(?:è|e)re)?s?\.?\s*à\s*soupe|cuil(?:l(?:è|e)re)?s?\.?\s*a\s*soupe)(?=\s|$|,|\.|\))/, 'cs', 1],
+  [/^(?:c\.?\s*(?:à|a)\s*caf(?:é|e)|c\.?\s*à\s*c\.?|c\.?\s*a\s*c\.?|cc|càc|cac|cuil(?:l(?:è|e)re)?s?\.?\s*à\s*café|cuil(?:l(?:è|e)re)?s?\.?\s*a\s*cafe)(?=\s|$|,|\.|\))/, 'cc', 1],
+  [/^pinc(?:é|e)es?\b/, 'pincee', 1], [/^gousses?\b/, 'gousse', 1], [/^tranches?\b/, 'tranche', 1],
+  [/^sachets?\b/, 'sachet', 1], [/^bo(?:î|i)tes?\b/, 'boite', 1], [/^bottes?\b/, 'botte', 1]
+];
+/* mesures sans équivalent dans l'appli : la quantité est laissée vide (le texte d'origine reste visible) */
+const IMP_VAGUE = /^(?:verres?|tasses?|bols?|pots?|paquets?|poign(?:é|e)es?|brins?|branches?|feuilles?|filets?|traits?|noix|noisettes?|zestes?|morceaux?|louches?|barquettes?|cubes?|rouleaux?|doses?|petits? morceaux?)\b/;
+const IMP_FRAC = { '½':0.5, '¼':0.25, '¾':0.75, '⅓':0.33, '⅔':0.67, '⅛':0.125 };
+function impNum(t){
+  t = t.replace(',', '.');
+  const f = t.match(/^(\d+)\s*\/\s*(\d+)$/); if(f) return Number(f[2]) ? Number(f[1]) / Number(f[2]) : NaN;
+  const m = t.match(/^(\d+)\s+(\d+)\s*\/\s*(\d+)$/); if(m) return Number(m[1]) + Number(m[2]) / Number(m[3]);
+  return Number(t);
+}
+/* écriture de la liste : le nom le plus long reconnu en partant du début (« lardons fumés » → Lardon) */
+function impMatch(name){
+  const words = name.split(/\s+/).filter(Boolean);
+  for(let n = words.length; n > 0; n--){
+    const k = ingFind(words.slice(0, n).join(' ')); if(k) return { k, exact: n === words.length };
+  }
+  return null;
+}
+function parseIngLine(raw){
+  let s = String(raw || '').replace(/\s+/g, ' ').trim();
+  s = s.replace(/[½¼¾⅓⅔⅛]/g, (c, i) => (i > 0 && /\d/.test(s[i - 1]) ? ' ' : '') + IMP_FRAC[c]);
+  s = s.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
+  let qty = '', unit = '', factor = 1;
+  const q = s.match(/^(\d+\s+\d+\s*\/\s*\d+|\d+\s*\/\s*\d+|\d+(?:[.,]\d+)?)\s*/);
+  if(q){
+    const v = impNum(q[1].trim()); if(v > 0) qty = v;
+    s = s.slice(q[0].length).replace(/^(?:à|a|-|–|ou)\s*\d+(?:[.,]\d+)?\s*/i, '');   // « 2 à 3 tomates » : la plus petite quantité
+  }
+  const low = s.toLowerCase();
+  if(qty !== ''){
+    const u = IMP_UNITS.find(([re]) => re.test(low));
+    if(u){ unit = u[1]; factor = u[2]; s = s.slice(low.match(u[0])[0].length).trim(); }
+    else if(IMP_VAGUE.test(low)){ qty = ''; s = s.slice(low.match(IMP_VAGUE)[0].length).trim(); }
+  }
+  s = s.replace(/^(?:de la |de l['’]|du |des |de |d['’]|of )/i, '').trim();
+  /* « Sel, poivre » / « sel et poivre » sans quantité : une ligne par ingrédient */
+  if(qty === '' && /,| et /.test(s)){
+    const parts = s.split(/\s*,\s*|\s+et\s+/).map(x => x.trim()).filter(Boolean);
+    if(parts.length > 1 && parts.every(x => x.split(' ').length <= 3)) return parts.flatMap(x => parseIngLine(x));
+  }
+  s = s.split(/\s*,\s*|\s+ou\s+|\s+pour\s+|\s*:\s*/)[0].trim();                  // « tomates, coupées en dés » → tomates
+  if(!s) return [];
+  if(qty !== '') qty = Math.round(qty * factor * 1000) / 1000;
+  const m = impMatch(s);   // exact : nom identique ; sinon raccourci (« lait de coco » → Lait) : à vérifier
+  return [{ name: m ? m.k : ingTidy(s), qty, unit, ok: !!m, exact: !!(m && m.exact), raw: String(raw || '').trim() }];
+}
+/* rendement « 6 personnes », « 8 parts », « 4 » → nombre de personnes (sinon rien) */
+function impServings(list){
+  for(const y of [].concat(list || [])){
+    const m = String(y).match(/(\d+)\s*(?:-\s*\d+\s*)?(personnes?|pers\b|portions?|parts?|couverts?|servings?|people)?/i);
+    if(m && (m[2] || /^\s*\d+\s*$/.test(String(y)))){ const n = Number(m[1]); if(n > 0 && n < 100) return n; }
+  }
+  return 0;
+}
+const recipeImport = {
+  /* appelle la fonction « import-recette » du projet Supabase (voir README) */
+  async fetch(url, withImage){
+    const t = await auth.token();
+    if(!t) throw new Error('Connecte-toi pour importer une recette');
+    let r;
+    try{
+      r = await fetch(SUPABASE_URL + '/functions/v1/import-recette', { method:'POST',
+        headers:{ apikey:SUPABASE_KEY, Authorization:'Bearer ' + t, 'Content-Type':'application/json' },
+        body: JSON.stringify({ url, image: !!withImage }) });
+    }catch(e){ throw new Error('Connexion impossible : vérifie ta connexion internet'); }
+    const j = await r.json().catch(() => ({}));
+    if(r.status === 404 && !j.error) throw new Error('L’import n’est pas encore installé sur ton projet Supabase (voir le README)');
+    if(!r.ok) throw new Error(j.error || j.message || 'Import impossible (' + r.status + ')');
+    return j;
+  }
+};
+
 /* nombre de recettes utilisant chaque écriture d'ingrédient */
 function ingUsage(){
   const m = new Map();
@@ -3469,6 +3564,11 @@ function openRecipeForm(id, opts = {}){
   openModal(`
     <h2>${r ? 'Modifier la recette' : 'Nouvelle recette'}</h2>
     <form id="recForm" autocomplete="off">
+      ${CLOUD_OK && auth.session && !r ? `<div class="impbox">
+        <div class="impbox-t">🔗 Importer depuis un site <small>Marmiton, 750g, Cuisine AZ…</small></div>
+        <div class="row" style="gap:8px;flex-wrap:nowrap"><input type="text" id="iuUrl" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Colle le lien de la recette"><button type="button" class="btn sm" id="iuGo">Importer</button></div>
+        <div class="iumsg" id="iuMsg"></div>
+      </div>` : ''}
       <label class="f">Nom de la recette</label>
       <input type="text" id="rName" required value="${r?esc(r.name):''}" placeholder="Ex. Risotto aux champignons">
 
@@ -3499,6 +3599,7 @@ function openRecipeForm(id, opts = {}){
         ${(r&&r.ingredients&&r.ingredients.length ? r.ingredients : [{name:'',qty:'',unit:'g'}]).map(i=>ingredientRow(i.name,i.qty,i.unit ?? 'g')).join('')}
       </div>
       <button type="button" class="btn ghost block" style="margin-top:8px" data-act="adding">+ Ajouter une ligne</button>
+      <details class="iuorig" id="iuOrig" hidden><summary>Ingrédients tels qu’écrits sur le site</summary><ul></ul></details>
 
       <label class="f">Préparation <span class="opt">(facultatif)</span></label>
       <textarea id="rSteps" rows="5" placeholder="Une étape par ligne :&#10;Préchauffer le four à 180 °C&#10;Éplucher et couper les pommes&#10;…">${r&&r.steps?esc(r.steps):''}</textarea>
@@ -3507,6 +3608,7 @@ function openRecipeForm(id, opts = {}){
       <label class="f">Lien de la recette <span class="opt">(facultatif)</span></label>
       <input type="text" id="rUrl" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" value="${r&&r.url?esc(r.url):''}" placeholder="https://www.marmiton.org/…">
       <div class="err" id="rUrlErr" style="min-height:0"></div>
+      ${CLOUD_OK && auth.session && r ? `<button type="button" class="linkbtn" id="iuFromUrl" style="margin-top:6px">⤓ Remplir la recette depuis ce lien</button><div class="iumsg" id="iuMsg2"></div>` : ''}
 
       <label class="f">Étiquettes</label>
       <input type="text" id="rTags" list="tagSuggest" value="${r?esc((r.tags||[]).join(', ')):''}" placeholder="végétarien, rapide, hiver…">
@@ -3652,8 +3754,8 @@ function openRecipeForm(id, opts = {}){
   if(!r && opts.name) $('#rName').value = opts.name;
   /* photo : préparée (compressée) au choix, envoyée seulement à l'enregistrement */
   let phNew = null, phDrop = false, phBusy = null;      // phBusy : préparation en cours (attendue à l'enregistrement)
-  if($('#phFile')) $('#phFile').addEventListener('change', () => {
-    const file = $('#phFile').files[0]; $('#phFile').value = ''; if(!file) return;
+  const pickPhoto = file => {
+    if(!$('#phPick')) return;
     $('#phErr').textContent = ''; $('#phPick').textContent = '⏳ Préparation…';
     const job = phBusy = (async () => {
       try{
@@ -3666,7 +3768,58 @@ function openRecipeForm(id, opts = {}){
       }catch(e){ if(!$('#phErr')) return; $('#phErr').textContent = e.message + '.'; }
       if($('#phPick')) $('#phPick').textContent = '📷 ' + (phNew || (hasPhoto(r) && !phDrop) ? 'Changer la photo' : 'Ajouter une photo');
     })().finally(() => { if(phBusy === job) phBusy = null; });
+  };
+  if($('#phFile')) $('#phFile').addEventListener('change', () => {
+    const file = $('#phFile').files[0]; $('#phFile').value = ''; if(file) pickPhoto(file);
   });
+  /* ---- import depuis un site : remplit le formulaire, rien n'est enregistré avant « Enregistrer » ---- */
+  const applyImport = (d, url) => {
+    if(d.name) $('#rName').value = d.name;
+    if(d.duration > 0) $('#rDur').value = d.duration;
+    const n = impServings(d.yield); if(n){ $('#rServ').value = n; servBase = null; paintIngFor(false); }
+    $('#rUrl').value = d.url || url; $('#rUrlErr').textContent = '';
+    const lines = (d.ingredients || []).flatMap(parseIngLine);
+    if(lines.length){
+      $('#ingWrap').innerHTML = lines.map(l => ingredientRow(l.name, l.qty, l.unit)).join('');
+      $$('#ingWrap .ingline').forEach((row, i) => {
+        const inp = row.querySelector('.i-name'), l = lines[i];
+        if(!l.ok) inp.classList.add('bad');
+        else if(!l.exact){ inp.classList.add('approx'); inp.title = 'Sur le site : ' + l.raw; }
+      });
+    }
+    const orig = $('#iuOrig');
+    if((d.ingredients || []).length){ orig.hidden = false; orig.querySelector('ul').innerHTML = d.ingredients.map(x => `<li>${esc(x)}</li>`).join(''); }
+    if((d.steps || []).length) $('#rSteps').value = d.steps.join('\n');
+    if(d.imageData && photos.can() && !(hasPhoto(r) && !phDrop)){
+      try{
+        const [head, data] = d.imageData.split(','), type = (head.match(/^data:([^;]+)/) || [])[1] || 'image/jpeg';
+        const bin = atob(data), buf = new Uint8Array(bin.length); for(let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+        pickPhoto(new File([buf], 'import', { type }));
+      }catch(e){ /* photo facultative */ }
+    }
+    const bad = lines.filter(l => !l.ok).length, approx = lines.filter(l => l.ok && !l.exact).length;
+    return `✓ Recette importée : ${lines.length} ingrédient${lines.length > 1 ? 's' : ''}, ${(d.steps || []).length} étape${(d.steps || []).length > 1 ? 's' : ''}.`
+      + (bad ? ` ${bad} ingrédient${bad > 1 ? 's' : ''} à choisir dans la liste (en rouge).` : '')
+      + (approx ? ` ${approx} à vérifier (en orange).` : '') + ' Relis tout avant d’enregistrer.';
+  };
+  const runImport = async (url, btn, msg) => {
+    msg.className = 'iumsg'; msg.textContent = '';
+    const u = safeUrl(url);
+    if(!u){ msg.classList.add('err'); msg.textContent = url.trim() ? 'Ce lien ne semble pas valide.' : 'Colle d’abord le lien d’une recette.'; return; }
+    if(r && !confirm('Remplacer le contenu de la recette par celui du site ?')) return;
+    const label = btn.textContent; btn.disabled = true; btn.textContent = '⏳ Import…';
+    try{
+      const d = await recipeImport.fetch(u, photos.can());
+      if(!$('#recForm')) return;                        // formulaire fermé entre-temps
+      msg.classList.add('ok'); msg.textContent = applyImport(d, u);
+    }catch(e){ if(!$('#recForm')) return; msg.classList.add('err'); msg.textContent = e.message + '.'; }
+    finally{ btn.disabled = false; btn.textContent = label; }
+  };
+  if($('#iuGo')) $('#iuGo').addEventListener('click', () => runImport($('#iuUrl').value, $('#iuGo'), $('#iuMsg')));
+  if($('#iuUrl')) $('#iuUrl').addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); $('#iuGo').click(); } });
+  if($('#iuFromUrl')) $('#iuFromUrl').addEventListener('click', () => runImport($('#rUrl').value, $('#iuFromUrl'), $('#iuMsg2')));
+  wrap.addEventListener('input', e => e.target.classList.remove('approx'));
+  wrap.addEventListener('ingpicked', e => e.target.classList.remove('approx'));
   if($('#phDel')) $('#phDel').addEventListener('click', () => {
     phNew = null; phDrop = hasPhoto(r);
     $('#phPrev').hidden = true; $('#phPrev').innerHTML = ''; $('#phDel').hidden = true;
