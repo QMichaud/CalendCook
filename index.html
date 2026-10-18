@@ -426,6 +426,8 @@
   .impbox-t{font-weight:800;font-size:14px;color:var(--accent-deep);margin-bottom:8px}
   .impbox-t small{font-weight:600;color:var(--ink-soft);font-size:12px;margin-left:4px}
   .impbox input{flex:1;min-width:0}
+  .impbox textarea{width:100%;min-height:110px;font-size:14px}
+  .imptabs{margin-bottom:9px;background:var(--sheet)}
   .iumsg{font-size:13px;margin-top:6px;line-height:1.4}
   .iumsg:empty{display:none}
   .iumsg.ok{color:var(--accent-deep)}
@@ -2869,13 +2871,21 @@ function impMatch(name){
   for(let n = words.length; n > 0; n--){
     const k = ingFind(words.slice(0, n).join(' ')); if(k) return { k, exact: n === words.length };
   }
+  /* sinon en retirant les premiers mots : « petits épis de maïs frais » → Maïs */
+  for(let i = 1; i < words.length; i++){
+    if(/^(?:de|d['’]|du|des|à|au|aux|la|le|les|l['’]|en|et)$/i.test(words[i])) continue;
+    for(let n = words.length; n > i; n--){
+      const k = ingFind(words.slice(i, n).join(' ')); if(k) return { k, exact: false };
+    }
+  }
   return null;
 }
 function parseIngLine(raw){
   let s = String(raw || '').replace(/\s+/g, ' ').trim();
   s = s.replace(/[½¼¾⅓⅔⅛]/g, (c, i) => (i > 0 && /\d/.test(s[i - 1]) ? ' ' : '') + IMP_FRAC[c]);
+  const pw = s.match(/\((?:env\.?\s*|environ\s*)?(\d+(?:[.,]\d+)?)\s*(g|kg|ml|cl|l)\)/i);   // poids entre parenthèses
   s = s.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
-  let qty = '', unit = '', factor = 1;
+  let qty = '', unit = '', factor = 1, vague = false;
   const q = s.match(/^(\d+\s+\d+\s*\/\s*\d+|\d+\s*\/\s*\d+|\d+(?:[.,]\d+)?)\s*/);
   if(q){
     const v = impNum(q[1].trim()); if(v > 0) qty = v;
@@ -2885,19 +2895,22 @@ function parseIngLine(raw){
   if(qty !== ''){
     const u = IMP_UNITS.find(([re]) => re.test(low));
     if(u){ unit = u[1]; factor = u[2]; s = s.slice(low.match(u[0])[0].length).trim(); }
-    else if(IMP_VAGUE.test(low)){ qty = ''; s = s.slice(low.match(IMP_VAGUE)[0].length).trim(); }
+    else if(IMP_VAGUE.test(low)){ qty = ''; vague = true; s = s.slice(low.match(IMP_VAGUE)[0].length).trim(); }
   }
   s = s.replace(/^(?:de la |de l['’]|du |des |de |d['’]|of )/i, '').trim();
   /* « Sel, poivre » / « sel et poivre » sans quantité : une ligne par ingrédient */
   if(qty === '' && /,| et /.test(s)){
-    const parts = s.split(/\s*,\s*|\s+et\s+/).map(x => x.trim()).filter(Boolean);
+    const prep = /^(?:(?:finement|grossièrement|bien|très)\s+)?[a-zà-ÿ-]+(?:é|ée|és|ées|i|ie|is|ies)$|^en\s/i;   // « émincé », « haché », « en dés »
+    const parts = s.split(/\s*,\s*|\s+et\s+/).map(x => x.trim()).filter(x => x && !prep.test(x));
     if(parts.length > 1 && parts.every(x => x.split(' ').length <= 3)) return parts.flatMap(x => parseIngLine(x));
+    if(parts.length === 1) s = parts[0];
   }
   s = s.split(/\s*,\s*|\s+ou\s+|\s+pour\s+|\s*:\s*/)[0].trim();                  // « tomates, coupées en dés » → tomates
   if(!s) return [];
+  if(pw && !unit){ qty = Number(pw[1].replace(',', '.')); unit = pw[2].toLowerCase(); factor = 1; }
   if(qty !== '') qty = Math.round(qty * factor * 1000) / 1000;
   const m = impMatch(s);   // exact : nom identique ; sinon raccourci (« lait de coco » → Lait) : à vérifier
-  return [{ name: m ? m.k : ingTidy(s), qty, unit, ok: !!m, exact: !!(m && m.exact), raw: String(raw || '').trim() }];
+  return [{ name: m ? m.k : ingTidy(s), qty, unit, ok: !!m, exact: !!(m && m.exact) && !vague, raw: String(raw || '').trim() }];
 }
 /* rendement « 6 personnes », « 8 parts », « 4 » → nombre de personnes (sinon rien) */
 function impServings(list){
@@ -2907,6 +2920,103 @@ function impServings(list){
   }
   return 0;
 }
+/* ---------- import depuis un texte collé (livre de cuisine photographié, note, message…) ----------
+   Chaque ligne est classée : titre de section, nombre de personnes, ingrédient, étape ou note.
+   Les ingrédients reconnus s'appuient sur la liste de l'appli ; ce qui n'est pas utilisé
+   (introduction, astuces…) est renvoyé à part pour que rien ne soit perdu. */
+const TXT_HEAD_ING  = /^(?:les\s+)?(?:ingr[ée]dients?|ingredienti)\b/i;
+const TXT_HEAD_STEP = /^(?:la\s+)?(?:pr[ée]paration|r[ée]alisation|[ée]tapes?|instructions?|m[ée]thode|progression|d[ée]roul[ée]|recette|come fare|preparazione|procedimento|directions?|method)\b/i;
+const TXT_HEAD_NOTE = /^(?:l['’]\s*)?(?:astuces?|conseils?|notes?|essentiel|variantes?|bon à savoir|à savoir|le petit plus|suggestions?|tips?|info(?:rmation)?s?)\b/i;
+const TXT_UNIT = '(?:g|gr|kg|mg|ml|cl|dl|l|c\\.?\\s*à\\s*[sc]\\.?|cuil\\S*\\.?\\s*à\\s*(?:soupe|café|cafe)|pincées?|gousses?|tranches?|sachets?|bo[iî]tes?|bottes?|pots?|verres?|feuilles?|brins?)';
+const TXT_QTY_ONLY = new RegExp('^x?\\s*(\\d+(?:[.,]\\d+)?|[½¼¾])\\s*(' + TXT_UNIT + ')?\\.?$', 'i');
+const TXT_REVERSED = new RegExp('^([^\\d½¼¾].*?)\\s+x?\\s*(\\d+(?:[.,]\\d+)?|[½¼¾])\\s*(' + TXT_UNIT + ')?\\.?$', 'i');
+const TXT_QB = /^(.+?)\s+(?:qb|q\.\s?b\.|qs|q\.\s?s\.|à volonté|selon (?:le |votre )?goût|au goût)$/i;
+const TXT_STEP_NUM = /^(?:(?:étape|etape|step)\s*)?(\d{1,2})\s*[.)\/–-]\s*(?=\S)(.*)$/i;
+const txtCaps = l => { const a = l.replace(/[^A-Za-zÀ-ÿ]/g, ''); return a.length >= 3 && a === a.toUpperCase() && l.split(/\s+/).length <= 6; };
+const txtProse = l => /^[A-ZÀ-Ý]/.test(l) && (l.split(/\s+/).length >= 7 || (/[.!?]$/.test(l) && l.length > 25));   // une phrase commence par une majuscule
+function txtFixOcr(l){
+  return l.replace(/×/g, 'x').replace(/[“”«»]/g, '').trim()
+    .replace(/^[Il|](?=[.)]\s)/, '1')                                                   // « I. Préchauffez » → 1.
+    .replace(/^[I|](?=\s+\S)/, '1').replace(/^l(?=\s+(?:cuil|c\.|g\b|kg\b|cl\b|ml\b|pinc|gousse|tranche|sachet))/i, '1')
+    .replace(/(\s)[I|](?=\s+(?:cuil|c\.\s*à))/g, '$11');                               // « de | cuillère » → de 1 cuillère
+}
+function parseRecipeText(text){
+  let lines = String(text || '').replace(/\r/g, '').split('\n').map(txtFixOcr).filter(Boolean);
+  /* lignes coupées au milieu d'une phrase : « …vous pouvez terminer » + « les restes… » */
+  const joined = [];
+  for(const l of lines){
+    const prev = joined[joined.length - 1];
+    if(prev && prev.length > 40 && !/[.!?:;]$/.test(prev) && /^[a-zà-ÿ]/.test(l) && !TXT_QTY_ONLY.test(l)) joined[joined.length - 1] = prev + ' ' + l;
+    else joined.push(l);
+  }
+  lines = joined;
+  const numbered = lines.filter(l => TXT_STEP_NUM.test(l) && /^[A-ZÀ-Ý]/.test(l.replace(TXT_STEP_NUM, '$2')) && l.length > 15).length >= 2;
+  const out = { name:'', yield:[], ingredients:[], orig:[], steps:[], unused:[] };
+  let mode = 'none', lastIng = -1, pending = null, curStep = -1;
+  const ingOk = l => { const r = parseIngLine(l); return r.length > 0 && r.every(x => x.ok); };
+  const addIng = (str, orig) => { out.ingredients.push(str); out.orig.push(orig); lastIng = out.ingredients.length - 1; };
+  const flushPending = () => { if(pending){ if(ingOk(pending)) addIng(pending, pending); else out.unused.push(pending); pending = null; } };
+  lines.forEach((l, idx) => {
+    const bare = l.replace(/\s*:$/, '');
+    /* numéro de page, « 64 . INSALATA » */
+    if(/^\d+$/.test(l) || /^\d+\s*[.·•-]\s*[A-ZÀ-Ý ]+$/.test(l)){ return; }
+    /* titres de section */
+    if(bare.split(/\s+/).length <= 4 && (TXT_HEAD_ING.test(bare) || TXT_HEAD_STEP.test(bare) || TXT_HEAD_NOTE.test(bare)) && (txtCaps(bare) || /:$/.test(l) || bare.split(/\s+/).length <= 2)){
+      flushPending();
+      mode = TXT_HEAD_ING.test(bare) ? 'ing' : TXT_HEAD_STEP.test(bare) ? 'steps' : 'notes'; lastIng = -1; return;
+    }
+    /* nombre de personnes : « Pour 4 personnes », « Per 4 amici », « Pour 1 pain (10 à 12 parts) » */
+    if(l.length < 60 && /^(?:pour|per|for|serves?)\b/i.test(l)){
+      const m = l.match(/(\d+)\s*(?:(?:à|a|-|–)\s*\d+\s*)?(?:parts?|personnes?|pers\b|portions?|couverts?|amis|amici|people|servings?)/i) || l.match(/^(?:pour|per|for|serves?)\s+(\d+)/i);
+      if(m && !out.yield.length){ out.yield.push(m[1]); flushPending(); if(mode === 'none' || mode === 'notes') mode = 'ing'; return; }
+      if(txtCaps(l) || /:$/.test(l)){ flushPending(); mode = 'ing'; lastIng = -1; return; }       // « POUR LA GARNITURE »
+    }
+    if(txtCaps(bare) && !/\d/.test(bare) && !ingOk(bare)){ flushPending(); return; }            // autre titre en capitales
+    /* étape numérotée */
+    const sn = l.match(TXT_STEP_NUM);
+    if(numbered && sn && /^[A-ZÀ-Ý]/.test(sn[2]) && l.length > 15){
+      flushPending(); out.steps.push(sn[2].trim()); curStep = out.steps.length - 1; mode = mode === 'ing' ? 'ing' : 'steps'; lastIng = -1; return;
+    }
+    /* quantité seule, qui complète la ligne précédente : « Jambon de Parme » + « x 16 tranches » */
+    if(TXT_QTY_ONLY.test(l)){
+      const q = l.replace(/^x\s*/i, '');
+      if(pending){ addIng(q + ' ' + pending, pending + ' ' + l); pending = null; }
+      else if(lastIng >= 0){ out.ingredients[lastIng] = q + ' ' + out.ingredients[lastIng].replace(/^\d+(?:[.,]\d+)?\s*/, ''); out.orig[lastIng] += ' ' + l; }
+      else out.unused.push(l);
+      return;
+    }
+    /* prose : étape, ou texte d'introduction / note */
+    if(txtProse(l)){
+      flushPending();
+      if(mode === 'notes' || (numbered && curStep < 0) || (mode === 'ing' && !/[.!?]$/.test(l))) out.unused.push(l);
+      else if(numbered){ out.steps[curStep] += ' ' + l; }
+      else { out.steps.push(l); curStep = out.steps.length - 1; }
+      lastIng = -1; return;
+    }
+    /* suite de la ligne d'ingrédient précédente : « 1 cuil. à soupe de cumin » + « en poudre » */
+    if(lastIng >= 0 && /^(?:en|de|d['’]|du|des|à|au|aux|bien|très)\b/i.test(l) && l.split(/\s+/).length <= 4){
+      out.ingredients[lastIng] += ' ' + l; out.orig[lastIng] += ' ' + l; return;
+    }
+    if(mode === 'notes'){ out.unused.push(l); return; }
+    /* première ligne courte : le titre */
+    if(idx === 0 && !/^\d|[½¼¾]/.test(l) && l.split(/\s+/).length <= 9 && !ingOk(l)){ out.name = bare; return; }
+    flushPending();
+    /* deux ingrédients sur une ligne : « piment, émincé ½ oignon rouge… » */
+    const parts = l.split(/\s+(?=[½¼¾⅓⅔]\s)|\s+(?=\d+(?:[.,]\d+)?\s*(?:g|kg|cl|ml)\s+(?:de |d['’]))/).filter(Boolean);
+    parts.forEach(part => {
+      const qb = part.match(TXT_QB), rv = part.match(TXT_REVERSED);
+      if(qb){ addIng(qb[1], part); return; }                                                    // « Basilic QB »
+      if(/^(\d|[½¼¾⅓⅔])/.test(part)){ addIng(part, part); return; }                             // « 140 g de farine »
+      if(rv && rv[1].split(/\s+/).length <= 6){ addIng(rv[2] + (rv[3] ? ' ' + rv[3] : '') + ' ' + rv[1], part); return; }   // « Sucrine 400 g »
+      if(ingOk(part) || (lastIng >= 0 && /^[a-zà-ÿ]/.test(part) && parseIngLine(part).some(x => x.ok))){ addIng(part, part); return; }
+      pending = part;                                                                           // peut-être suivie de sa quantité
+    });
+  });
+  flushPending();
+  out.steps = out.steps.map(x => x.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  return out;
+}
+
 const recipeImport = {
   /* appelle la fonction « import-recette » du projet Supabase (voir README) */
   async fetch(url, withImage){
@@ -3564,9 +3674,16 @@ function openRecipeForm(id, opts = {}){
   openModal(`
     <h2>${r ? 'Modifier la recette' : 'Nouvelle recette'}</h2>
     <form id="recForm" autocomplete="off">
-      ${CLOUD_OK && auth.session && !r ? `<div class="impbox">
-        <div class="impbox-t">🔗 Importer depuis un site <small>Marmiton, 750g, Cuisine AZ…</small></div>
-        <div class="row" style="gap:8px;flex-wrap:nowrap"><input type="text" id="iuUrl" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Colle le lien de la recette"><button type="button" class="btn sm" id="iuGo">Importer</button></div>
+      ${!r ? `<div class="impbox">
+        <div class="impbox-t">⚡ Remplir automatiquement</div>
+        ${CLOUD_OK ? `<div class="seg imptabs"><button type="button" class="on" data-iu="url">🔗 Depuis un lien</button><button type="button" data-iu="txt">📋 Depuis un texte</button></div>` : ''}
+        ${CLOUD_OK ? `<div class="iupane" data-iupane="url">${auth.session
+          ? `<div class="row" style="gap:8px;flex-wrap:nowrap"><input type="text" id="iuUrl" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Colle le lien (Marmiton, 750g…)"><button type="button" class="btn sm" id="iuGo">Importer</button></div>`
+          : '<div class="muted" style="font-size:13px">Connecte-toi pour importer depuis un site.</div>'}</div>` : ''}
+        <div class="iupane" data-iupane="txt"${CLOUD_OK ? ' hidden' : ''}>
+          <textarea id="iuTxt" rows="5" placeholder="Colle ici le texte de la recette : ingrédients et étapes (copié depuis une note, un message, une photo de livre…)"></textarea>
+          <button type="button" class="btn sm block" id="iuTxtGo" style="margin-top:8px">Analyser le texte</button>
+        </div>
         <div class="iumsg" id="iuMsg"></div>
       </div>` : ''}
       <label class="f">Nom de la recette</label>
@@ -3600,6 +3717,7 @@ function openRecipeForm(id, opts = {}){
       </div>
       <button type="button" class="btn ghost block" style="margin-top:8px" data-act="adding">+ Ajouter une ligne</button>
       <details class="iuorig" id="iuOrig" hidden><summary>Ingrédients tels qu’écrits sur le site</summary><ul></ul></details>
+      <details class="iuorig" id="iuRest" hidden><summary>Texte non utilisé (introduction, astuces…)</summary><ul></ul></details>
 
       <label class="f">Préparation <span class="opt">(facultatif)</span></label>
       <textarea id="rSteps" rows="5" placeholder="Une étape par ligne :&#10;Préchauffer le four à 180 °C&#10;Éplucher et couper les pommes&#10;…">${r&&r.steps?esc(r.steps):''}</textarea>
@@ -3777,7 +3895,7 @@ function openRecipeForm(id, opts = {}){
     if(d.name) $('#rName').value = d.name;
     if(d.duration > 0) $('#rDur').value = d.duration;
     const n = impServings(d.yield); if(n){ $('#rServ').value = n; servBase = null; paintIngFor(false); }
-    $('#rUrl').value = d.url || url; $('#rUrlErr').textContent = '';
+    if(d.url || url){ $('#rUrl').value = d.url || url; $('#rUrlErr').textContent = ''; }
     const lines = (d.ingredients || []).flatMap(parseIngLine);
     if(lines.length){
       $('#ingWrap').innerHTML = lines.map(l => ingredientRow(l.name, l.qty, l.unit)).join('');
@@ -3787,8 +3905,11 @@ function openRecipeForm(id, opts = {}){
         else if(!l.exact){ inp.classList.add('approx'); inp.title = 'Sur le site : ' + l.raw; }
       });
     }
-    const orig = $('#iuOrig');
-    if((d.ingredients || []).length){ orig.hidden = false; orig.querySelector('ul').innerHTML = d.ingredients.map(x => `<li>${esc(x)}</li>`).join(''); }
+    const orig = $('#iuOrig'), src = d.orig || d.ingredients || [];
+    orig.hidden = !src.length; orig.querySelector('summary').textContent = 'Ingrédients tels qu’écrits ' + (d.orig ? 'dans le texte' : 'sur le site');
+    orig.querySelector('ul').innerHTML = src.map(x => `<li>${esc(x)}</li>`).join('');
+    const rest = $('#iuRest'), un = d.unused || [];
+    rest.hidden = !un.length; rest.querySelector('ul').innerHTML = un.map(x => `<li>${esc(x)}</li>`).join('');
     if((d.steps || []).length) $('#rSteps').value = d.steps.join('\n');
     if(d.imageData && photos.can() && !(hasPhoto(r) && !phDrop)){
       try{
@@ -3800,7 +3921,8 @@ function openRecipeForm(id, opts = {}){
     const bad = lines.filter(l => !l.ok).length, approx = lines.filter(l => l.ok && !l.exact).length;
     return `✓ Recette importée : ${lines.length} ingrédient${lines.length > 1 ? 's' : ''}, ${(d.steps || []).length} étape${(d.steps || []).length > 1 ? 's' : ''}.`
       + (bad ? ` ${bad} ingrédient${bad > 1 ? 's' : ''} à choisir dans la liste (en rouge).` : '')
-      + (approx ? ` ${approx} à vérifier (en orange).` : '') + ' Relis tout avant d’enregistrer.';
+      + (approx ? ` ${approx} à vérifier (en orange).` : '') + ' Relis tout avant d’enregistrer.'
+      + ((d.unused || []).length ? ' Le texte non utilisé est en bas des ingrédients.' : '');
   };
   const runImport = async (url, btn, msg) => {
     msg.className = 'iumsg'; msg.textContent = '';
@@ -3817,6 +3939,19 @@ function openRecipeForm(id, opts = {}){
   };
   if($('#iuGo')) $('#iuGo').addEventListener('click', () => runImport($('#iuUrl').value, $('#iuGo'), $('#iuMsg')));
   if($('#iuUrl')) $('#iuUrl').addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); $('#iuGo').click(); } });
+  $$('.imptabs [data-iu]').forEach(b => b.addEventListener('click', () => {
+    $$('.imptabs [data-iu]').forEach(x => x.classList.toggle('on', x === b));
+    $$('[data-iupane]').forEach(x => { x.hidden = x.dataset.iupane !== b.dataset.iu; });
+    $('#iuMsg').className = 'iumsg'; $('#iuMsg').textContent = '';
+  }));
+  if($('#iuTxtGo')) $('#iuTxtGo').addEventListener('click', () => {
+    const msg = $('#iuMsg'); msg.className = 'iumsg';
+    const t = $('#iuTxt').value;
+    if(!t.trim()){ msg.classList.add('err'); msg.textContent = 'Colle d’abord le texte d’une recette.'; return; }
+    const d = parseRecipeText(t);
+    if(!d.ingredients.length && !d.steps.length){ msg.classList.add('err'); msg.textContent = 'Je n’ai trouvé ni ingrédient ni étape dans ce texte.'; return; }
+    msg.classList.add('ok'); msg.textContent = applyImport(d, '').replace('Recette importée', 'Texte analysé');
+  });
   if($('#iuFromUrl')) $('#iuFromUrl').addEventListener('click', () => runImport($('#rUrl').value, $('#iuFromUrl'), $('#iuMsg2')));
   wrap.addEventListener('input', e => e.target.classList.remove('approx'));
   wrap.addEventListener('ingpicked', e => e.target.classList.remove('approx'));
