@@ -3,7 +3,7 @@ Calendrier de recettes de cuisine
 
 ## Import d'une recette depuis un site
 
-Dans « Nouvelle recette », le bloc **🔗 Importer depuis un site** remplit le formulaire
+Dans « Nouvelle recette », le bloc **⚡ Remplir automatiquement** → « Depuis un lien » remplit le formulaire
 (nom, photo, durée, nombre de personnes, ingrédients, étapes) à partir d'un lien Marmiton,
 750g, Cuisine AZ, Ptitchef… Rien n'est enregistré avant « Enregistrer » : on relit, on corrige.
 
@@ -22,3 +22,8 @@ Avec l'outil en ligne de commande Supabase, c'est équivalent à :
 
 La fonction n'accepte que les personnes connectées à l'application et ne lit que des pages
 publiques (adresses internes refusées).
+
+L'onglet **« Depuis un texte »** fonctionne sans rien installer : on colle le texte d'une recette
+(copié depuis une note, un message, ou la photo d'un livre de cuisine) et l'application repère
+le nombre de personnes, les ingrédients et les étapes. Ce qui n'est pas utilisé (introduction,
+astuces…) reste consultable sous les ingrédients.
