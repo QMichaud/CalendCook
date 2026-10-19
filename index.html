@@ -16,7 +16,7 @@
      marge rouge, titres manuscrits
      ============================================================ */
   :root{
-    --paper:#F5DFCD;          /* fond de la page : papier pêche */
+    --paper:#F5DFCD;          /* fond de la page : papier pêche (autres couleurs : « Apparence ») */
     --paper-2:#EFEADF;        /* papier un peu plus foncé (champs, code) */
     --sheet:#FFFDF8;          /* feuilles posées sur la page (cartes) */
     --past:#E6E1D5;           /* jours passés : papier plus sombre */
@@ -39,6 +39,11 @@
     --hand:"Caveat","Noteworthy","Segoe Print","Comic Sans MS",cursive;
     --safe:env(safe-area-inset-bottom, 0px);
   }
+  :root[data-bg="creme"]{--paper:#F1E9D8}
+  :root[data-bg="ciel"]{--paper:#DCE7F2}
+  :root[data-bg="menthe"]{--paper:#DCEBDF}
+  :root[data-bg="rose"]{--paper:#F5DCE0}
+  :root[data-bg="lavande"]{--paper:#E6E0F1}
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;padding:0}
   body{
@@ -131,20 +136,58 @@
     padding:26px 14px;border:1.5px dashed var(--line);border-radius:var(--radius);background:rgba(255,253,248,.7);
   }
 
-  /* ---------- Boutons : encre bleue ---------- */
-  .btn{
-    display:inline-flex;align-items:center;justify-content:center;gap:7px;
-    border:0;border-radius:8px;padding:12px 16px;font-size:15px;font-weight:700;
-    background:var(--accent);color:#fff;cursor:pointer;transition:transform .08s,background .15s;
-    box-shadow:0 2px 0 var(--accent-deep);
+  /* ---------- Boutons : des post-its ----------
+     principal : post-it de couleur (bleu ciel, rose ou vert menthe, au choix dans « Apparence ») ;
+     secondaire : papier recyclé crème avec une pointe de la même couleur. Coin corné en bas à droite. */
+  :root,[data-btn="ciel"]{
+    --pi-1:#D6E6FB; --pi-2:#BFD6F6; --pi-fold:#9DBBE6; --pi-ink:#1F3F78; --pi-sh:rgba(40,70,120,.4);
+    --pc-1:#EEECE4; --pc-2:#E6E2D6; --pc-fold:#D2CBBB;
   }
-  .btn:active{transform:translateY(1px);box-shadow:0 1px 0 var(--accent-deep)}
-  .btn:disabled{opacity:.6}
+  [data-btn="rose"]{
+    --pi-1:#FFD3DC; --pi-2:#FFBFCD; --pi-fold:#EE9BAE; --pi-ink:#6E2238; --pi-sh:rgba(140,50,70,.4);
+    --pc-1:#F4E9E0; --pc-2:#ECDFD2; --pc-fold:#D8C9B6;
+  }
+  [data-btn="menthe"]{
+    --pi-1:#CFEFD9; --pi-2:#B5E3C3; --pi-fold:#8CCB9F; --pi-ink:#1E4D33; --pi-sh:rgba(40,100,60,.4);
+    --pc-1:#EDEDDF; --pc-2:#E5E3D1; --pc-fold:#D1CCB6;
+  }
+  .btn{
+    position:relative;display:inline-flex;align-items:center;justify-content:center;gap:7px;
+    border:0;border-radius:2px;padding:12px 16px;font-size:15px;font-weight:800;
+    color:var(--pi-ink);background:linear-gradient(170deg,var(--pi-1),var(--pi-2));cursor:pointer;
+    box-shadow:0 1px 1px rgba(80,60,40,.15),0 8px 12px -6px var(--pi-sh);
+    transition:transform .08s,box-shadow .08s;
+  }
+  .btn::after{                                   /* coin corné */
+    content:"";position:absolute;right:0;bottom:0;width:14px;height:14px;pointer-events:none;
+    background:linear-gradient(315deg,var(--sheet) 50%,var(--pi-fold) 50%);box-shadow:-1px -1px 2px rgba(80,60,40,.18);
+  }
+  .btn:active{transform:translateY(1px);box-shadow:0 1px 1px rgba(80,60,40,.15),0 3px 5px -3px var(--pi-sh)}
+  .btn:disabled{opacity:.55;cursor:default}
   .btn.block{width:100%}
-  .btn.ghost{background:var(--accent-soft);color:var(--accent-deep);box-shadow:none}
-  .btn.line{background:transparent;border:1.5px solid var(--line);color:var(--ink-soft);box-shadow:none}
-  .btn.sm{padding:8px 12px;font-size:13.5px;border-radius:7px}
-  .btn.danger{background:var(--sheet);color:var(--red);border:1.5px solid rgba(201,83,76,.35);box-shadow:none}
+  .btn.ghost,.btn.line,.btn.danger{
+    background:linear-gradient(170deg,var(--pc-1),var(--pc-2));color:var(--pi-ink);
+    box-shadow:0 1px 1px rgba(80,60,40,.18),0 0 0 1px rgba(120,100,70,.08),0 8px 12px -6px rgba(90,70,40,.35);
+  }
+  .btn.ghost::after,.btn.line::after,.btn.danger::after{background:linear-gradient(315deg,var(--sheet) 50%,var(--pc-fold) 50%)}
+  .btn.ghost:active,.btn.line:active,.btn.danger:active{box-shadow:0 1px 1px rgba(80,60,40,.18),0 0 0 1px rgba(120,100,70,.08),0 3px 5px -3px rgba(90,70,40,.35)}
+  .btn.danger{color:var(--red)}
+  .btn.sm{padding:8px 12px;font-size:13.5px}
+  .btn.sm::after{width:10px;height:10px}
+  .lookbtns{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+  .lookbgs{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+  .lookbtn,.lookbg{display:flex;flex-direction:column;align-items:center;gap:6px;padding:9px 6px 8px;border:1.5px solid var(--line);border-radius:10px;
+    background:var(--sheet);font:inherit;font-size:13px;font-weight:700;color:var(--ink);cursor:pointer}
+  .lookbtn.on,.lookbg.on{border-color:var(--accent);box-shadow:0 0 0 2px rgba(47,93,168,.18);background:var(--accent-soft)}
+  .lookpi{position:relative;width:52px;height:30px;border-radius:2px;background:linear-gradient(170deg,var(--pi-1),var(--pi-2));
+    box-shadow:0 1px 1px rgba(80,60,40,.15),0 6px 9px -5px var(--pi-sh)}
+  .lookpi::after{content:"";position:absolute;right:0;bottom:0;width:10px;height:10px;background:linear-gradient(315deg,var(--accent-soft) 50%,var(--pi-fold) 50%)}
+  .lookbtn:not(.on) .lookpi::after{background:linear-gradient(315deg,var(--sheet) 50%,var(--pi-fold) 50%)}
+  .lookpaper{width:52px;height:34px;border-radius:4px;border:1px solid rgba(100,80,60,.18);
+    background-image:linear-gradient(var(--grid-c) 1px,transparent 1px),linear-gradient(90deg,var(--grid-c) 1px,transparent 1px);background-size:8px 8px}
+  .lookprev{padding:14px;border-radius:8px;background-color:var(--paper);background-image:var(--grid);background-size:var(--grid-size)}
+  #newRec{transform:rotate(-.6deg)}              /* le gros post-it, posé un peu de travers */
+  #newRec:active{transform:rotate(-.6deg) translateY(1px)}
   .row{display:flex;gap:9px;align-items:center}
   .row.wrap{flex-wrap:wrap}
 
@@ -168,7 +211,7 @@
     border:1.5px solid rgba(47,93,168,.38);
     box-shadow:0 2px 0 rgba(47,93,168,.18), 0 4px 12px rgba(39,50,74,.10);
   }
-  .stickybar .btn.ghost,.stickybar .pill:not(.cloud){background:var(--sheet);border:1px solid rgba(47,93,168,.25)}
+  .stickybar .pill:not(.cloud){background:var(--sheet);border:1px solid rgba(47,93,168,.25)}
   .stickybar .iconbtn{border-color:rgba(47,93,168,.3)}
   #weekBar .row{flex-wrap:wrap;row-gap:8px}          /* petits écrans : le compteur passe à la ligne */
   #wCount{margin-left:auto}
@@ -522,6 +565,7 @@
   .slotday.has .pill{background:var(--hl-soft);color:var(--ink)}
   /* créneau déjà au menu : même jaune « post-it » que les plats du calendrier */
   .btn.slot-done{background:var(--hl-soft);color:var(--ink);box-shadow:0 1px 2px rgba(120,100,30,.12);border:1px solid var(--hl-line);cursor:default}
+  .btn.slot-done::after{display:none}
   .sheet h2{margin:0 0 12px;font-family:var(--hand);font-size:32px;line-height:1.05;font-weight:700;color:var(--accent-deep)}
   .sheet .foot{display:flex;gap:9px;margin-top:18px}
   .sheet .foot .btn{flex:1}
@@ -658,6 +702,11 @@
   details.help code{font-size:12px;background:var(--paper-2);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
   details.help pre{background:var(--paper-2);padding:10px;border-radius:6px;overflow-x:auto;font-size:11.5px;line-height:1.5}
 </style>
+<script>
+  /* apparence choisie sur cet appareil (couleur des boutons, du fond) : appliquée avant l'affichage */
+  try{ const l = JSON.parse(localStorage.getItem('mesrecettes.look') || '{}');
+    if(l.btn) document.documentElement.dataset.btn = l.btn; if(l.bg) document.documentElement.dataset.bg = l.bg; }catch(e){}
+</script>
 </head>
 <body>
 
@@ -1437,6 +1486,7 @@ function openLogin(email = '', err = ''){
         <button type="submit" class="btn" id="lGo">${SEND_LABEL}</button>
       </div>
     </form>
+    <div style="text-align:center;margin-top:12px"><button type="button" class="linkbtn" data-act="look">🎨 Apparence (couleurs)</button></div>
   `);
   $('#loginForm').addEventListener('submit', async ev=>{
     ev.preventDefault();
@@ -1852,6 +1902,34 @@ function openFriendRecipe(i){
   `);
 }
 
+/* ---------- apparence : couleur des boutons et du fond, propre à cet appareil ---------- */
+const LS_LOOK = 'mesrecettes.look';
+const LOOK_BTN = [ ['ciel', 'Bleu ciel'], ['rose', 'Rose'], ['menthe', 'Vert menthe'] ];
+const LOOK_BG = [ ['peche', 'Pêche', '#F5DFCD'], ['creme', 'Crème', '#F1E9D8'], ['ciel', 'Bleu ciel', '#DCE7F2'],
+                  ['menthe', 'Vert menthe', '#DCEBDF'], ['rose', 'Rose poudré', '#F5DCE0'], ['lavande', 'Lavande', '#E6E0F1'] ];
+function lookGet(){ try{ return JSON.parse(localStorage.getItem(LS_LOOK) || '{}') || {}; }catch(e){ return {}; } }
+function lookSet(k, v){
+  const l = lookGet(); l[k] = v;
+  try{ localStorage.setItem(LS_LOOK, JSON.stringify(l)); }catch(e){}
+  const def = k === 'btn' ? 'ciel' : 'peche';
+  if(v === def) delete document.documentElement.dataset[k]; else document.documentElement.dataset[k] = v;
+}
+function openLook(){
+  const l = lookGet(), btn = l.btn || 'ciel', bg = l.bg || 'peche';
+  openModal(`
+    <h2>Apparence</h2>
+    <div class="muted" style="margin-bottom:4px">Change les couleurs de l’application. Le choix est gardé sur cet appareil.</div>
+    <label class="f">Couleur des boutons</label>
+    <div class="lookbtns">${LOOK_BTN.map(([k, n]) => `<button type="button" class="lookbtn${k === btn ? ' on' : ''}" data-act="lookset" data-k="btn" data-v="${k}" aria-pressed="${k === btn}">
+      <span class="lookpi" data-btn="${k}"></span><span>${n}</span></button>`).join('')}</div>
+    <label class="f">Couleur du fond</label>
+    <div class="lookbgs">${LOOK_BG.map(([k, n, c]) => `<button type="button" class="lookbg${k === bg ? ' on' : ''}" data-act="lookset" data-k="bg" data-v="${k}" aria-pressed="${k === bg}">
+      <span class="lookpaper" style="background-color:${c}"></span><span>${n}</span></button>`).join('')}</div>
+    <label class="f">Aperçu</label>
+    <div class="lookprev"><div class="row"><span class="btn ghost" style="flex:1">Annuler</span><span class="btn" style="flex:1">Enregistrer</span></div></div>
+    <div class="foot"><button class="btn block" data-act="closemodal">C’est tout bon</button></div>
+  `);
+}
 /* ---------- menu du bouton en haut à droite : foyers, création, déconnexion ---------- */
 function closeMenu(){ const m = $('#acctMenu'); if(m) m.hidden = true; }
 function toggleMenu(){
@@ -1869,6 +1947,7 @@ function toggleMenu(){
     ${cloud.foyer ? `<button class="menu-i" data-act="foyer"><span class="menu-ck">⚙</span><span class="menu-t">Membres &amp; réglages</span></button>` : ''}
     <button class="menu-i" data-act="ingredients"><span class="menu-ck">🥕</span><span class="menu-t">Ingrédients</span>${ingUnknown().length ? `<span class="menu-badge">${ingUnknown().length}</span>` : ''}</button>
     ${people.ok ? `<button class="menu-i" data-act="pseudo"><span class="menu-ck">🙂</span><span class="menu-t">Mon profil</span></button>` : ''}
+    <button class="menu-i" data-act="look"><span class="menu-ck">🎨</span><span class="menu-t">Apparence</span></button>
     <button class="menu-i" data-act="friends"><span class="menu-ck">👥</span><span class="menu-t">Amis</span>${friends.pending ? `<span class="menu-badge">${friends.pending}</span>` : ''}</button>
     <button class="menu-i" data-act="logout"><span class="menu-ck">↩</span><span class="menu-t">Se déconnecter</span></button>
     <div class="menu-foot">${people.mine ? `<b>${esc(people.mine)}</b><br>` : ''}${esc(auth.email)}</div>`;
@@ -2437,6 +2516,7 @@ function openModal(html){
   sh.classList.remove('dragging','settle'); sh.style.transform = ''; $('#modal').style.background = '';
   sh.innerHTML = '<div class="grab"></div>' + html;
   $('#modal').classList.add('on');
+  sh.scrollTop = 0;                                      // une nouvelle fenêtre s'ouvre toujours en haut
   document.body.style.overflow = 'hidden';
 }
 function closeModal(){
@@ -4267,6 +4347,12 @@ document.addEventListener('click', e=>{
     case 'ftag': filterTag = t.dataset.tag || null; renderRecipes(); break;
     case 'ftagall': filterTag = t.dataset.tag || null; closeModal(); renderRecipes(); window.scrollTo({ top:0 }); break;
     case 'closemodal': closeModal(); break;
+    case 'look': closeMenu(); openLook(); break;
+    case 'lookset': {
+      lookSet(t.dataset.k, t.dataset.v);
+      $$(`[data-act="lookset"][data-k="${t.dataset.k}"]`).forEach(b => { b.classList.toggle('on', b === t); b.setAttribute('aria-pressed', b === t); });
+      break;
+    }
     case 'servstep': { const box = t.closest('.serv'); setServings(box, Number(box.dataset.n) + Number(t.dataset.d)); break; }
     case 'askquit': closeModal(); break;
     case 'asksave': $('#ask').hidden = true; if($('#recForm')) $('#recForm').requestSubmit(); break;
