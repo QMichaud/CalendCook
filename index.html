@@ -142,14 +142,17 @@
   :root,[data-btn="ciel"]{
     --pi-1:#D6E6FB; --pi-2:#BFD6F6; --pi-fold:#9DBBE6; --pi-ink:#1F3F78; --pi-sh:rgba(40,70,120,.4);
     --pc-1:#EEECE4; --pc-2:#E6E2D6; --pc-fold:#D2CBBB;
+    --bar-bg:#E3EBF8; --bar-line:rgba(47,93,168,.38); --bar-soft:rgba(47,93,168,.25); --bar-sh:rgba(47,93,168,.18);
   }
   [data-btn="rose"]{
     --pi-1:#FFD3DC; --pi-2:#FFBFCD; --pi-fold:#EE9BAE; --pi-ink:#6E2238; --pi-sh:rgba(140,50,70,.4);
     --pc-1:#F4E9E0; --pc-2:#ECDFD2; --pc-fold:#D8C9B6;
+    --bar-bg:#FBE5EA; --bar-line:rgba(176,74,104,.36); --bar-soft:rgba(176,74,104,.24); --bar-sh:rgba(176,74,104,.16);
   }
   [data-btn="menthe"]{
     --pi-1:#CFEFD9; --pi-2:#B5E3C3; --pi-fold:#8CCB9F; --pi-ink:#1E4D33; --pi-sh:rgba(40,100,60,.4);
     --pc-1:#EDEDDF; --pc-2:#E5E3D1; --pc-fold:#D1CCB6;
+    --bar-bg:#E1F2E6; --bar-line:rgba(46,125,80,.36); --bar-soft:rgba(46,125,80,.24); --bar-sh:rgba(46,125,80,.16);
   }
   .btn{
     position:relative;display:inline-flex;align-items:center;justify-content:center;gap:7px;
@@ -205,14 +208,14 @@
     position:sticky;top:var(--hdr, 70px);z-index:15;
     transition:transform .22s ease, opacity .22s ease;
   }
-  /* bleu clair « intercalaire » pour se détacher du papier blanc */
+  /* « intercalaire » de la couleur des boutons (bleu ciel, rose ou vert menthe) pour se détacher du papier blanc */
   .stickybar{
-    background-color:#E3EBF8;
-    border:1.5px solid rgba(47,93,168,.38);
-    box-shadow:0 2px 0 rgba(47,93,168,.18), 0 4px 12px rgba(39,50,74,.10);
+    background-color:var(--bar-bg);
+    border:1.5px solid var(--bar-line);
+    box-shadow:0 2px 0 var(--bar-sh), 0 4px 12px rgba(39,50,74,.10);
   }
-  .stickybar .pill:not(.cloud){background:var(--sheet);border:1px solid rgba(47,93,168,.25)}
-  .stickybar .iconbtn{border-color:rgba(47,93,168,.3)}
+  .stickybar .pill:not(.cloud){background:var(--sheet);border:1px solid var(--bar-soft)}
+  .stickybar .iconbtn{border-color:var(--bar-soft)}
   #weekBar .row{flex-wrap:wrap;row-gap:8px}          /* petits écrans : le compteur passe à la ligne */
   #wCount{margin-left:auto}
   /* roue des réglages : juste le dessin, tracé à l'encre comme le reste */
@@ -232,7 +235,7 @@
   details.fold[open] > summary{margin-bottom:4px}
   .tagpick.imprec{background:var(--sheet);color:var(--ink-soft);text-decoration:line-through;text-decoration-color:rgba(107,115,134,.6)}
   .tagpick.imprec.on{background:var(--hl-soft);border-color:var(--hl-line);color:var(--ink);text-decoration:none}
-  .stickybar.stuck{box-shadow:0 2px 0 rgba(47,93,168,.18), 0 8px 20px rgba(39,50,74,.20)}
+  .stickybar.stuck{box-shadow:0 2px 0 var(--bar-sh), 0 8px 20px rgba(39,50,74,.20)}
   .stickybar.away{transform:translateY(calc(-100% - var(--hdr, 70px)));opacity:0;pointer-events:none}
   #recBar .tagbox{margin-top:10px}
   #recBar .tagpick{background:var(--sheet)}
