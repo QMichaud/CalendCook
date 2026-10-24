@@ -371,6 +371,23 @@
   .pgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   .pcard{aspect-ratio:1/1;background:var(--sheet);border:1px solid var(--line);border-radius:10px;overflow:hidden;box-shadow:var(--shadow);display:flex;flex-direction:column;cursor:pointer;min-width:0}
   .pcard:active{transform:scale(.985)}
+  /* fenêtre « Ajouter au … » : hauteur fixe, seule la liste des recettes défile */
+  .sheet.tall{height:92vh;height:92dvh;display:flex;flex-direction:column}
+  .sheet.tall > *{flex:none}
+  .sheet.tall > .picklist{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;margin:0 -4px;padding:2px 4px 8px}
+  .pickseas{margin:9px -2px 0}
+  .pickings{margin-top:8px}
+  .pickingin{position:relative}
+  .pickingin input{width:100%}
+  .pickdrop{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:30;background:var(--sheet);border:1px solid var(--line);border-radius:10px;
+    box-shadow:var(--shadow);max-height:240px;overflow-y:auto;padding:4px}
+  .pickdrop .ingopt small{margin-left:auto;color:var(--ink-soft);font-weight:600;font-size:11.5px}
+  #pickIngSel:empty{display:none}
+  .pickinfo{font-size:12.5px;color:var(--ink-soft);margin:8px 2px 6px;min-height:18px}
+  .pickempty{margin-top:4px}
+  .pcard.planned{opacity:.78}
+  .pc-ph{position:relative}
+  .pc-flag{position:absolute;left:6px;top:6px;background:var(--hl);color:var(--ink);font-size:11px;font-weight:800;padding:2px 7px;border-radius:10px;box-shadow:0 1px 2px rgba(0,0,0,.15)}
   .pc-ph{flex:0 0 50%;display:flex;align-items:center;justify-content:center;font-size:34px;background:var(--paper-2);overflow:hidden}
   .pc-ph img{width:100%;height:100%;object-fit:cover;display:block}
   .pc-ph.ph-gone{display:flex !important}
@@ -2516,7 +2533,7 @@ function askUnsaved(){ $('#ask').hidden = false; }
 function openModal(html){
   modalGuard = null; $('#ask').hidden = true;
   const sh = $('#sheet');
-  sh.classList.remove('dragging','settle'); sh.style.transform = ''; $('#modal').style.background = '';
+  sh.classList.remove('dragging','settle','tall'); sh.style.transform = ''; $('#modal').style.background = '';
   sh.innerHTML = '<div class="grab"></div>' + html;
   $('#modal').classList.add('on');
   sh.scrollTop = 0;                                      // une nouvelle fenêtre s'ouvre toujours en haut
@@ -2542,7 +2559,9 @@ $('#modal').addEventListener('click', e => { if(e.target.id === 'modal') dismiss
     const t = e.touches[0];
     y0 = lastY = t.clientY; x0 = t.clientX; lastT = Date.now(); dy = 0; vy = 0;
     const onTop = t.clientY - sh.getBoundingClientRect().top < 56;   // poignée + titre
-    mode = (onTop || sh.scrollTop <= 0) ? '' : 'scroll';
+    let inner = false;                                    // liste intérieure déjà défilée (choix d'une recette)
+    for(let el = e.target; el && el !== sh; el = el.parentElement) if(el.scrollTop > 0){ inner = true; break; }
+    mode = (onTop || (sh.scrollTop <= 0 && !inner)) ? '' : 'scroll';
   }, { passive:true });
   sh.addEventListener('touchmove', e=>{
     if(mode === 'scroll' || e.touches.length !== 1) return;
@@ -2587,10 +2606,22 @@ $('#modal').addEventListener('click', e => { if(e.target.id === 'modal') dismiss
 
 /* ---- choisir une recette pour un créneau ---- */
 let pickerCtx = null;
+/* ---------- choisir une recette pour un créneau du calendrier ----------
+   Fenêtre de hauteur fixe : filtres en haut (texte, étiquette, saisons, ingrédients),
+   recettes en cartes carrées (comme l'onglet « Recherche ») qui défilent en dessous. */
+const pickF = { saisons:[], ings:[] };                 // filtres gardés d'une ouverture à l'autre
 function openPicker(dateKey, slot){
   pickerCtx = { dateKey, slot };
   const day = state.plan[dateKey] || {};
   const already = (day[slot] || []).map(eidOf);
+  const tags = tagCounts();
+  /* ingrédients présents dans les recettes du foyer, écrits comme dans la liste */
+  const used = new Map();
+  state.recipes.forEach(r => new Set((r.ingredients || []).filter(i => i && i.name).map(i => matchKey(i.name))).forEach(k => {
+    const name = (r.ingredients.find(i => i && i.name && matchKey(i.name) === k) || {}).name;
+    const e = used.get(k) || { k, name: ingFind(name) || ingTidy(name), n:0 }; e.n++; used.set(k, e);
+  }));
+  pickF.ings = pickF.ings.filter(k => used.has(k));
   openModal(`
     <h2>Ajouter au ${DAYS[(new Date(dateKey+'T12:00:00').getDay()+6)%7].toLowerCase()} ${SLOTS.find(s=>s.k===slot).l.toLowerCase()}</h2>
     <div class="pickbar">
@@ -2598,35 +2629,89 @@ function openPicker(dateKey, slot){
         <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
         <input type="search" id="pickQ" placeholder="Rechercher…" autocomplete="off">
       </div>
-      ${tagCounts().length ? `<select id="pickTag" aria-label="Filtrer par étiquette">
+      ${tags.length ? `<select id="pickTag" aria-label="Filtrer par étiquette">
         <option value="">🏷 Toutes</option>
-        ${tagCounts().map(([t,n]) => `<option value="${esc(t)}">${esc(t)} (${n})</option>`).join('')}
+        ${tags.map(([t,n]) => `<option value="${esc(t)}">${esc(t)} (${n})</option>`).join('')}
       </select>` : ''}
     </div>
-    <div id="pickList" style="max-height:48vh;overflow-y:auto"></div>
+    <div class="fchips pickseas" id="pickSeas">${SAISONS.map(x => `<button type="button" class="fchip" data-saison="${x.k}">${x.e} ${x.l}</button>`).join('')}</div>
+    <div class="pickings">
+      <div class="pickingin"><input type="text" id="pickIng" placeholder="🥕 Avec les ingrédients…" autocomplete="off" autocorrect="off" spellcheck="false">
+        <div class="pickdrop" id="pickDrop" hidden></div></div>
+      <div class="tagbox" id="pickIngSel" style="margin-top:6px"></div>
+    </div>
+    <div class="pickinfo" id="pickInfo"></div>
+    <div id="pickList" class="picklist"></div>
     <div class="foot">
       <button class="btn ghost" data-act="closemodal">Fermer</button>
       <button class="btn" id="pickNew">+ Nouvelle recette</button>
     </div>
   `);
+  $('#sheet').classList.add('tall');
+  const paintFilters = () => {
+    $$('#pickSeas [data-saison]').forEach(b => b.classList.toggle('on', pickF.saisons.includes(b.dataset.saison)));
+    $('#pickIngSel').innerHTML = pickF.ings.map(k => `<button type="button" class="tagpick on" data-ing="${esc(k)}" aria-label="Retirer ${esc(used.get(k).name)}">${esc(used.get(k).name)} ✕</button>`).join('');
+  };
   const paint = () => {
     const q = ($('#pickQ').value||'').trim().toLowerCase();
     const tag = $('#pickTag') ? $('#pickTag').value : '';
     let list = state.recipes.slice().sort((a,b)=>a.name.localeCompare(b.name,'fr'));
     if(q) list = list.filter(r => textHit(r.name, q) || (r.ingredients||[]).some(i => textHit(i.name, q)));
     if(tag) list = list.filter(r => (r.tags||[]).includes(tag));
-    $('#pickList').innerHTML = list.length ? list.map(r=>`
-      <div class="rec" style="margin-bottom:8px" data-act="doplan" data-id="${r.id}">
-        <h3>${esc(r.name)}</h3>
-        <div class="meta"><span>⏱ ${r.duration} min</span>${(r.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}${already.includes(r.id)?'<span class="pill">déjà prévu</span>':''}</div>
-      </div>`).join('')
-      : `<div class="empty">${state.recipes.length ? 'Aucune recette ne correspond.' : 'Aucune recette pour l’instant.'}<br><span class="muted">Tu peux en créer une avec « + Nouvelle recette ».</span></div>`;
+    if(pickF.saisons.length) list = list.filter(r => recipeSeasons(r).some(k => pickF.saisons.includes(k)));
+    if(pickF.ings.length) list = list.filter(r => { const ks = new Set((r.ingredients || []).filter(i => i && i.name).map(i => matchKey(i.name)));
+      return pickF.ings.every(k => ks.has(k)); });
+    const filtered = !!(q || tag || pickF.saisons.length || pickF.ings.length);
+    $('#pickInfo').innerHTML = state.recipes.length
+      ? `${list.length} recette${list.length > 1 ? 's' : ''}${filtered ? ` · <button type="button" class="linkbtn" id="pickClear">effacer les filtres</button>` : ''}` : '';
+    $('#pickList').innerHTML = list.length ? `<div class="pgrid">${list.map(r => {
+        const ph = hasPhoto(r) ? r.photo.t : '';
+        const ings = (r.ingredients || []).filter(i => i && i.name).map(i => i.name).join(' · ');
+        return `<div class="pcard${already.includes(r.id) ? ' planned' : ''}" data-act="doplan" data-id="${r.id}" role="button" aria-label="${esc(r.name)}">
+          <div class="pc-ph${ph ? ' ph-wait' : ''}" data-photo-box>${ph ? `<img data-photo="${esc(ph)}" alt="">` : '<span>🍽</span>'}
+            ${already.includes(r.id) ? '<span class="pc-flag">déjà prévu</span>' : ''}</div>
+          <div class="pc-b"><div class="pc-t">${esc(r.name)}</div>
+            <div class="pc-n"><em style="margin-left:0">⏱ ${r.duration} min${Number(r.servings) > 0 ? ' · 👥 ' + Number(r.servings) : ''}</em></div>
+            <div class="pc-i">${esc(ings) || '<span class="muted">Ingrédients non renseignés</span>'}</div></div></div>`; }).join('')}</div>`
+      : `<div class="empty pickempty">${state.recipes.length ? 'Aucun résultat.' : 'Aucune recette pour l’instant.'}<br><span class="muted">${state.recipes.length ? 'Essaie d’autres filtres, ou crée' : 'Tu peux en créer une avec'} « + Nouvelle recette ».</span></div>`;
+    if($('#pickClear')) $('#pickClear').addEventListener('click', () => {
+      $('#pickQ').value = ''; if($('#pickTag')) $('#pickTag').value = ''; pickF.saisons = []; pickF.ings = []; paintFilters(); paint(); });
   };
+  /* ingrédients : on tape, on choisit dans la liste ; chaque choix s'ajoute aux précédents */
+  const inp = $('#pickIng'), drop = $('#pickDrop');
+  let opts = [], hi = 0;
+  const paintDrop = () => {
+    const v = inp.value.trim();
+    opts = Array.from(used.values()).filter(e => !pickF.ings.includes(e.k) && (!v || textHit(e.name, v)))
+      .sort((a, b) => v ? a.name.localeCompare(b.name, 'fr') : b.n - a.n || a.name.localeCompare(b.name, 'fr')).slice(0, 8);
+    hi = 0;
+    drop.innerHTML = opts.length ? opts.map((e, i) => `<button type="button" class="ingopt${i === 0 ? ' hi' : ''}" data-i="${i}">${esc(e.name)}<small>${e.n} recette${e.n > 1 ? 's' : ''}</small></button>`).join('')
+      : `<div class="ingdrop-hint">${used.size ? 'Aucun ingrédient de tes recettes ne correspond' : 'Tes recettes n’ont pas encore d’ingrédients'}</div>`;
+    drop.hidden = false;
+  };
+  const pickIng = e => { if(!e) return; pickF.ings.push(e.k); inp.value = ''; paintFilters(); paint(); paintDrop(); inp.focus(); };
+  inp.addEventListener('focus', paintDrop);
+  inp.addEventListener('input', paintDrop);
+  inp.addEventListener('blur', () => setTimeout(() => { if(document.activeElement !== inp) drop.hidden = true; }, 150));
+  inp.addEventListener('keydown', e => {
+    if(e.key === 'Enter'){ e.preventDefault(); pickIng(opts[hi]); }
+    else if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){ e.preventDefault(); if(!opts.length) return;
+      hi = (hi + (e.key === 'ArrowDown' ? 1 : -1) + opts.length) % opts.length;
+      $$('#pickDrop .ingopt').forEach((o, i) => o.classList.toggle('hi', i === hi)); }
+    else if(e.key === 'Escape'){ drop.hidden = true; inp.blur(); }
+  });
+  drop.addEventListener('pointerdown', e => e.preventDefault());      // le champ garde le focus
+  drop.addEventListener('click', e => { const o = e.target.closest('[data-i]'); if(o) pickIng(opts[+o.dataset.i]); });
+  $('#pickIngSel').addEventListener('click', e => { const b = e.target.closest('[data-ing]'); if(!b) return;
+    pickF.ings = pickF.ings.filter(k => k !== b.dataset.ing); paintFilters(); paint(); });
+  $('#pickSeas').addEventListener('click', e => { const b = e.target.closest('[data-saison]'); if(!b) return;
+    const k = b.dataset.saison; pickF.saisons = pickF.saisons.includes(k) ? pickF.saisons.filter(x => x !== k) : pickF.saisons.concat(k);
+    paintFilters(); paint(); });
   $('#pickQ').addEventListener('input', paint);
   if($('#pickTag')) $('#pickTag').addEventListener('change', paint);
   /* nouvelle recette : ajoutée directement à ce créneau une fois créée */
   $('#pickNew').addEventListener('click', ()=> openRecipeForm(null, { plan:{ dateKey, slot }, name:$('#pickQ').value.trim() }));
-  paint();
+  paintFilters(); paint();
 }
 /* étiquettes utilisées, avec leur nombre de recettes, triées par nom */
 function tagCounts(){
