@@ -237,14 +237,8 @@
   .tagpick.imprec.on{background:var(--hl-soft);border-color:var(--hl-line);color:var(--ink);text-decoration:none}
   .stickybar.stuck{box-shadow:0 2px 0 var(--bar-sh), 0 8px 20px rgba(39,50,74,.20)}
   .stickybar.away{transform:translateY(calc(-100% - var(--hdr, 70px)));opacity:0;pointer-events:none}
-  #recBar .tagbox{margin-top:10px}
-  #recBar .tagpick{background:var(--sheet)}
   #recBar .tagpick.on{background:var(--hl)}
-  .moretags{
-    display:block;margin:8px 0 0;padding:2px 0;border:0;background:none;cursor:pointer;
-    font-size:13px;font-weight:800;color:var(--accent);text-decoration:underline;text-underline-offset:3px;
-  }
-  .moretags[hidden]{display:none}
+  #recBar .fchip:not(.on),#recBar .pickingin input,#recBar select{background-color:var(--sheet)}
   .weeknav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px}
   .weeknav .lab{text-align:center;flex:1;min-width:0}
   .weeknav .lab b{display:block;font-family:var(--hand);font-size:30px;line-height:1;font-weight:700;color:var(--accent-deep)}
@@ -371,6 +365,28 @@
   .pgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   .pcard{aspect-ratio:1/1;background:var(--sheet);border:1px solid var(--line);border-radius:10px;overflow:hidden;box-shadow:var(--shadow);display:flex;flex-direction:column;cursor:pointer;min-width:0}
   .pcard:active{transform:scale(.985)}
+  /* fenêtre « Ajouter au … » : hauteur fixe, seule la liste des recettes défile */
+  .sheet.tall{height:92vh;height:92dvh;display:flex;flex-direction:column}
+  .sheet.tall > *{flex:none}
+  .sheet.tall > .picklist{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;margin:0 -4px;padding:2px 4px 8px}
+  .pickseas{margin:9px -2px 0}
+  .pickings{margin-top:8px}
+  .pickingin{position:relative}
+  .pickingin input{width:100%}
+  .pickdrop{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:30;background:var(--sheet);border:1px solid var(--line);border-radius:10px;
+    box-shadow:var(--shadow);max-height:240px;overflow-y:auto;padding:4px}
+  .pickdrop .ingopt small{margin-left:auto;color:var(--ink-soft);font-weight:600;font-size:11.5px}
+  .pickingsel:empty{display:none}
+  .pickinfo{font-size:12.5px;color:var(--ink-soft);margin:8px 2px 6px;min-height:18px}
+  .pickempty{margin-top:4px}
+  .pcard.planned{opacity:.78}
+  .pc-ph{position:relative}
+  .pc-flags{position:absolute;left:6px;top:6px;right:6px;display:flex;flex-direction:column;align-items:flex-start;gap:3px}
+  .pc-flags span{max-width:100%;background:rgba(255,253,248,.94);color:var(--ink);font-size:11px;font-weight:800;padding:2px 7px;border-radius:10px;
+    box-shadow:0 1px 2px rgba(0,0,0,.15);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pc-flags .pubb{background:var(--accent-soft);color:var(--accent-deep)}
+  #recList .pgrid{margin-top:2px}
+  .pc-flag{position:absolute;left:6px;top:6px;background:var(--hl);color:var(--ink);font-size:11px;font-weight:800;padding:2px 7px;border-radius:10px;box-shadow:0 1px 2px rgba(0,0,0,.15)}
   .pc-ph{flex:0 0 50%;display:flex;align-items:center;justify-content:center;font-size:34px;background:var(--paper-2);overflow:hidden}
   .pc-ph img{width:100%;height:100%;object-fit:cover;display:block}
   .pc-ph.ph-gone{display:flex !important}
@@ -775,12 +791,7 @@
         <button class="btn" id="newRec" style="flex:1">+ Nouvelle recette</button>
         <button class="btn ghost" id="friendRecBtn" hidden>👥 Recettes d’amis</button>
       </div>
-      <div class="searchwrap" style="margin-bottom:0">
-        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
-        <input type="search" id="qRec" placeholder="Rechercher une recette…">
-      </div>
-      <div class="tagbox" id="recTags"></div>
-      <button class="moretags" id="moreTags" hidden></button>
+      <div id="recFilters"></div>
     </div>
     <div class="rlist" id="recList"></div>
   </section>
@@ -2317,80 +2328,22 @@ addEventListener('scroll', ()=> weekBar.onScroll(), { passive:true });
 /* ============================================================
    RENDU — RECETTES
    ============================================================ */
-/* étiquettes limitées à 2 lignes ; au-delà, bouton « Voir toutes les étiquettes » */
-function clampTags(){
-  const box = $('#recTags'), more = $('#moreTags');
-  const chips = Array.from(box.children);
-  chips.forEach(c => c.hidden = false);
-  if(!$('#v-rec').classList.contains('on') || !chips.length){ more.hidden = true; return; }   // mesuré à l'affichage de l'onglet
-  const rows = Array.from(new Set(chips.map(c => c.offsetTop))).sort((a,b)=>a-b);
-  if(rows.length <= 2){ more.hidden = true; return; }
-  const hidden = chips.filter(c => c.offsetTop > rows[1]);
-  hidden.forEach(c => c.hidden = true);
-  more.textContent = 'Voir toutes les étiquettes (+' + hidden.length + ')';
-  more.hidden = false;
-}
-function openAllTags(){
-  const counts = {};
-  state.recipes.forEach(r => (r.tags||[]).forEach(t => counts[t] = (counts[t]||0)+1));
-  const tags = Object.keys(counts).sort((a,b)=>a.localeCompare(b,'fr'));
-  openModal(`
-    <h2>Étiquettes</h2>
-    ${tags.length > 12 ? `<div class="searchwrap"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
-      <input type="search" id="tagQ" placeholder="Chercher une étiquette…" autocomplete="off"></div>` : ''}
-    <div class="tagbox" id="allTags">
-      <button class="tagpick${filterTag===null?' on':''}" data-act="ftagall" data-tag="">Toutes (${state.recipes.length})</button>
-      ${tags.map(t=>`<button class="tagpick${filterTag===t?' on':''}" data-act="ftagall" data-tag="${esc(t)}">${esc(t)} <span class="cnt">${counts[t]}</span></button>`).join('')}
-    </div>
-    <div class="foot"><button class="btn ghost" data-act="closemodal">Fermer</button></div>
-  `);
-  if($('#tagQ')) $('#tagQ').addEventListener('input', ()=>{
-    const q = $('#tagQ').value.trim().toLowerCase();
-    $$('#allTags .tagpick').forEach(b => b.hidden = !!(q && b.dataset.tag && !b.dataset.tag.toLowerCase().includes(q)));
-  });
-}
-let filterTag = null;
+/* filtres de l'onglet Recettes (gardés tant que l'appli est ouverte) */
+const recF = { q:'', tag:'', saisons:[], ings:[] };
 function renderRecipes(){
-  const q = $('#qRec').value.trim().toLowerCase();
-  // nuage d'étiquettes
-  const counts = {};
-  state.recipes.forEach(r => (r.tags||[]).forEach(t => counts[t] = (counts[t]||0)+1));
-  if(filterTag && !counts[filterTag]) filterTag = null;       // étiquette disparue
-  /* l'étiquette choisie passe en tête, pour rester visible même repliée */
-  const tags = Object.keys(counts).sort((a,b)=> (b===filterTag) - (a===filterTag) || a.localeCompare(b,'fr'));
-  $('#recTags').innerHTML = tags.length
-    ? `<button class="tagpick${filterTag===null?' on':''}" data-act="ftag" data-tag="">Toutes (${state.recipes.length})</button>` +
-      tags.map(t=>`<button class="tagpick${filterTag===t?' on':''}" data-act="ftag" data-tag="${esc(t)}">${esc(t)} <span class="cnt">${counts[t]}</span></button>`).join('')
-    : '';
-  clampTags();
-
-  let list = state.recipes.slice().sort((a,b)=>a.name.localeCompare(b.name,'fr'));
-  if(q) list = list.filter(r => textHit(r.name, q) || (r.ingredients||[]).some(i => textHit(i.name, q)));
-  if(filterTag) list = list.filter(r => (r.tags||[]).includes(filterTag));
-
+  paintRecFilters('rec', recF);
+  const list = applyRecFilters(state.recipes.slice().sort((a,b)=>a.name.localeCompare(b.name,'fr')), recF);
   const unk = ingUnknown().length;
   const harm = unk ? `<button class="harmbar" data-act="ingredients">🥕 ${unk} ingrédient${unk > 1 ? 's' : ''} à harmoniser<span>›</span></button>` : '';
-  $('#recList').innerHTML = harm + (list.length ? list.map(r=>{
-    const ing = (r.ingredients||[]).length;
-    const tags = (r.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('');
-    return `<div class="rec${hasPhoto(r) ? ' has-ph' : ''}" data-act="openrec" data-id="${r.id}">
-      ${hasPhoto(r) ? `<span class="rec-ph ph-wait" data-photo-box><img data-photo="${esc(r.photo.t)}" alt=""></span>` : ''}
-      <div class="rec-b">
-      <h3>${esc(r.name)}</h3>
-      <div class="meta">
-        <span>⏱ ${r.duration} min</span>
-        ${r.servings ? `<span>👥 ${r.servings} pers.</span>` : ''}
-        ${safeUrl(r.url) ? `<span>🔗 ${esc(siteOf(safeUrl(r.url)))}</span>` : ''}
-        ${r.origin && r.origin.email ? `<span>📥 ${esc(pseudoOf(r.origin.email) || String(r.origin.email).split('@')[0])}</span>`
-          : r.origin && r.origin.pub ? `<span>📥 ${esc(r.origin.pseudo || 'recette publique')}</span>` : ''}
-        ${r.public ? `<span class="pubb">${pubBadge(r)}</span>` : ''}
-        <span>${ing} ingrédient${ing>1?'s':''}</span>
-      </div>
-      ${tags?`<div class="tags" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:7px">${tags}</div>`:''}
-      ${ing?`<div class="ing">${esc((r.ingredients||[]).map(i=>i.name + ((i.qty||i.unit) ? ' ('+qtyLabel(i.qty,i.unit)+')' : '')).join(' · '))}</div>`:''}
-      </div>
-    </div>`;
-  }).join('') : `<div class="empty">Aucune recette ${q||filterTag?'ne correspond à ce filtre':'pour l’instant'}.<br><span class="muted">Ajoute ta première recette avec le bouton ci-dessus.</span></div>`);
+  const flag = r => {
+    const f = [];
+    if(r.public) f.push(`<span class="pubb">${pubBadge(r)}</span>`);
+    if(r.origin && r.origin.email) f.push(`<span>📥 ${esc(pseudoOf(r.origin.email) || String(r.origin.email).split('@')[0])}</span>`);
+    else if(r.origin && r.origin.pub) f.push(`<span>📥 ${esc(r.origin.pseudo || 'recette publique')}</span>`);
+    return f.length ? `<span class="pc-flags">${f.join('')}</span>` : '';
+  };
+  $('#recList').innerHTML = harm + (state.recipes.length ? `<div class="pickinfo">${recCountHtml(list.length, recF)}</div>` : '')
+    + (list.length ? `<div class="pgrid">${list.map(r => recCard(r, 'openrec', flag(r))).join('')}</div>` : recEmptyHtml(recF));
 }
 
 /* ============================================================
@@ -2516,7 +2469,7 @@ function askUnsaved(){ $('#ask').hidden = false; }
 function openModal(html){
   modalGuard = null; $('#ask').hidden = true;
   const sh = $('#sheet');
-  sh.classList.remove('dragging','settle'); sh.style.transform = ''; $('#modal').style.background = '';
+  sh.classList.remove('dragging','settle','tall'); sh.style.transform = ''; $('#modal').style.background = '';
   sh.innerHTML = '<div class="grab"></div>' + html;
   $('#modal').classList.add('on');
   sh.scrollTop = 0;                                      // une nouvelle fenêtre s'ouvre toujours en haut
@@ -2542,7 +2495,9 @@ $('#modal').addEventListener('click', e => { if(e.target.id === 'modal') dismiss
     const t = e.touches[0];
     y0 = lastY = t.clientY; x0 = t.clientX; lastT = Date.now(); dy = 0; vy = 0;
     const onTop = t.clientY - sh.getBoundingClientRect().top < 56;   // poignée + titre
-    mode = (onTop || sh.scrollTop <= 0) ? '' : 'scroll';
+    let inner = false;                                    // liste intérieure déjà défilée (choix d'une recette)
+    for(let el = e.target; el && el !== sh; el = el.parentElement) if(el.scrollTop > 0){ inner = true; break; }
+    mode = (onTop || (sh.scrollTop <= 0 && !inner)) ? '' : 'scroll';
   }, { passive:true });
   sh.addEventListener('touchmove', e=>{
     if(mode === 'scroll' || e.touches.length !== 1) return;
@@ -2587,43 +2542,136 @@ $('#modal').addEventListener('click', e => { if(e.target.id === 'modal') dismiss
 
 /* ---- choisir une recette pour un créneau ---- */
 let pickerCtx = null;
+/* ---------- filtres et cartes des recettes du foyer ----------
+   Communs à l'onglet « Recettes » et au choix d'une recette pour le calendrier :
+   texte, étiquette, saisons (l'une ou l'autre), ingrédients (tous ceux choisis). */
+/* ingrédients présents dans les recettes du foyer, écrits comme dans la liste, avec leur nombre de recettes */
+function usedIngredients(){
+  const used = new Map();
+  state.recipes.forEach(r => {
+    const seen = new Set();
+    (r.ingredients || []).forEach(i => {
+      if(!i || !i.name) return; const k = matchKey(i.name); if(!k || seen.has(k)) return; seen.add(k);
+      const e = used.get(k) || { k, name: ingFind(i.name) || ingTidy(i.name), n:0 }; e.n++; used.set(k, e);
+    });
+  });
+  return used;
+}
+function applyRecFilters(list, f){
+  const q = (f.q || '').trim().toLowerCase();
+  if(q) list = list.filter(r => textHit(r.name, q) || (r.ingredients||[]).some(i => textHit(i.name, q)));
+  if(f.tag) list = list.filter(r => (r.tags||[]).includes(f.tag));
+  if(f.saisons.length) list = list.filter(r => recipeSeasons(r).some(k => f.saisons.includes(k)));
+  if(f.ings.length) list = list.filter(r => { const ks = new Set((r.ingredients || []).filter(i => i && i.name).map(i => matchKey(i.name)));
+    return f.ings.every(k => ks.has(k)); });
+  return list;
+}
+const recFiltered = f => !!((f.q || '').trim() || f.tag || f.saisons.length || f.ings.length);
+const recFiltersHtml = (id, placeholder) => `
+  <div class="pickbar">
+    <div class="searchwrap">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
+      <input type="search" id="${id}Q" placeholder="${placeholder}" autocomplete="off">
+    </div>
+    <select id="${id}Tag" aria-label="Filtrer par étiquette"></select>
+  </div>
+  <div class="fchips pickseas" id="${id}Seas">${SAISONS.map(x => `<button type="button" class="fchip" data-saison="${x.k}">${x.e} ${x.l}</button>`).join('')}</div>
+  <div class="pickings">
+    <div class="pickingin"><input type="text" id="${id}Ing" placeholder="🥕 Avec les ingrédients…" autocomplete="off" autocorrect="off" spellcheck="false">
+      <div class="pickdrop" id="${id}Drop" hidden></div></div>
+    <div class="tagbox pickingsel" id="${id}IngSel"></div>
+  </div>`;
+/* état affiché (étiquettes proposées, saisons cochées, ingrédients choisis) d'après les filtres f */
+function paintRecFilters(id, f){
+  const tags = tagCounts(), sel = $('#' + id + 'Tag');
+  if(f.tag && !tags.some(([t]) => t === f.tag)) f.tag = '';
+  const used = usedIngredients(); f.ings = f.ings.filter(k => used.has(k));
+  if(sel){ sel.hidden = !tags.length;
+    sel.innerHTML = `<option value="">🏷 Toutes</option>` + tags.map(([t,n]) => `<option value="${esc(t)}"${t === f.tag ? ' selected' : ''}>${esc(t)} (${n})</option>`).join(''); }
+  if($('#' + id + 'Q') && $('#' + id + 'Q').value !== (f.q || '')) $('#' + id + 'Q').value = f.q || '';
+  $$('#' + id + 'Seas [data-saison]').forEach(b => b.classList.toggle('on', f.saisons.includes(b.dataset.saison)));
+  $('#' + id + 'IngSel').innerHTML = f.ings.map(k => `<button type="button" class="tagpick on" data-ing="${esc(k)}" aria-label="Retirer ${esc(used.get(k).name)}">${esc(used.get(k).name)} ✕</button>`).join('');
+}
+function bindRecFilters(id, f, onChange){
+  const changed = () => { paintRecFilters(id, f); onChange(); };
+  $('#' + id + 'Q').addEventListener('input', () => { f.q = $('#' + id + 'Q').value; onChange(); });
+  $('#' + id + 'Tag').addEventListener('change', () => { f.tag = $('#' + id + 'Tag').value; onChange(); });
+  $('#' + id + 'Seas').addEventListener('click', e => { const b = e.target.closest('[data-saison]'); if(!b) return;
+    const k = b.dataset.saison; f.saisons = f.saisons.includes(k) ? f.saisons.filter(x => x !== k) : f.saisons.concat(k); changed(); });
+  $('#' + id + 'IngSel').addEventListener('click', e => { const b = e.target.closest('[data-ing]'); if(!b) return;
+    f.ings = f.ings.filter(k => k !== b.dataset.ing); changed(); });
+  /* ingrédients : on tape, on choisit dans la liste ; chaque choix s'ajoute aux précédents */
+  const inp = $('#' + id + 'Ing'), drop = $('#' + id + 'Drop');
+  let opts = [], hi = 0;
+  const paintDrop = () => {
+    const v = inp.value.trim(), used = usedIngredients();
+    opts = Array.from(used.values()).filter(e => !f.ings.includes(e.k) && (!v || textHit(e.name, v)))
+      .sort((a, b) => v ? a.name.localeCompare(b.name, 'fr') : b.n - a.n || a.name.localeCompare(b.name, 'fr')).slice(0, 8);
+    hi = 0;
+    drop.innerHTML = opts.length ? opts.map((e, i) => `<button type="button" class="ingopt${i === 0 ? ' hi' : ''}" data-i="${i}">${esc(e.name)}<small>${e.n} recette${e.n > 1 ? 's' : ''}</small></button>`).join('')
+      : `<div class="ingdrop-hint">${used.size ? 'Aucun ingrédient de tes recettes ne correspond' : 'Tes recettes n’ont pas encore d’ingrédients'}</div>`;
+    drop.hidden = false;
+  };
+  const pick = e => { if(!e) return; f.ings.push(e.k); inp.value = ''; changed(); paintDrop(); inp.focus(); };
+  inp.addEventListener('focus', paintDrop);
+  inp.addEventListener('input', paintDrop);
+  inp.addEventListener('blur', () => setTimeout(() => { if(document.activeElement !== inp) drop.hidden = true; }, 150));
+  inp.addEventListener('keydown', e => {
+    if(e.key === 'Enter'){ e.preventDefault(); pick(opts[hi]); }
+    else if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){ e.preventDefault(); if(!opts.length) return;
+      hi = (hi + (e.key === 'ArrowDown' ? 1 : -1) + opts.length) % opts.length;
+      $$('#' + id + 'Drop .ingopt').forEach((o, i) => o.classList.toggle('hi', i === hi)); }
+    else if(e.key === 'Escape'){ drop.hidden = true; inp.blur(); }
+  });
+  drop.addEventListener('pointerdown', e => e.preventDefault());      // le champ garde le focus
+  drop.addEventListener('click', e => { const o = e.target.closest('[data-i]'); if(o) pick(opts[+o.dataset.i]); });
+  paintRecFilters(id, f);
+}
+const recFiltersClear = f => Object.assign(f, { q:'', tag:'', saisons:[], ings:[] });
+/* compteur « 12 recettes · effacer les filtres » */
+const recCountHtml = (n, f) => `${n} recette${n > 1 ? 's' : ''}${recFiltered(f) ? ` · <button type="button" class="linkbtn" data-act="rfclear">effacer les filtres</button>` : ''}`;
+/* carte carrée d'une recette du foyer (photo, titre, durée, personnes, ingrédients) */
+function recCard(r, act, flag){
+  const ph = hasPhoto(r) ? r.photo.t : '';
+  const ings = (r.ingredients || []).filter(i => i && i.name).map(i => i.name).join(' · ');
+  return `<div class="pcard rcard" data-act="${act}" data-id="${r.id}" role="button" aria-label="${esc(r.name)}">
+    <div class="pc-ph${ph ? ' ph-wait' : ''}" data-photo-box>${ph ? `<img data-photo="${esc(ph)}" alt="">` : '<span>🍽</span>'}${flag || ''}</div>
+    <div class="pc-b"><div class="pc-t">${esc(r.name)}</div>
+      <div class="pc-n"><em style="margin-left:0">⏱ ${r.duration} min${Number(r.servings) > 0 ? ' · 👥 ' + Number(r.servings) + ' pers.' : ''}</em></div>
+      <div class="pc-i">${esc(ings) || '<span class="muted">Ingrédients non renseignés</span>'}</div></div></div>`;
+}
+const recEmptyHtml = f => `<div class="empty pickempty">${state.recipes.length ? 'Aucun résultat.' : 'Aucune recette pour l’instant.'}<br><span class="muted">${
+  state.recipes.length ? (recFiltered(f) ? 'Essaie d’autres filtres, ou crée' : 'Crée') + ' une recette avec « + Nouvelle recette ».' : 'Ajoute ta première recette avec « + Nouvelle recette ».'}</span></div>`;
+
+/* ---------- choisir une recette pour un créneau du calendrier ----------
+   Fenêtre de hauteur fixe : filtres en haut, cartes qui défilent en dessous. */
+const pickF = { q:'', tag:'', saisons:[], ings:[] };   // saisons et ingrédients gardés d'une ouverture à l'autre
 function openPicker(dateKey, slot){
   pickerCtx = { dateKey, slot };
   const day = state.plan[dateKey] || {};
   const already = (day[slot] || []).map(eidOf);
+  pickF.q = ''; pickF.tag = '';
   openModal(`
     <h2>Ajouter au ${DAYS[(new Date(dateKey+'T12:00:00').getDay()+6)%7].toLowerCase()} ${SLOTS.find(s=>s.k===slot).l.toLowerCase()}</h2>
-    <div class="pickbar">
-      <div class="searchwrap">
-        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
-        <input type="search" id="pickQ" placeholder="Rechercher…" autocomplete="off">
-      </div>
-      ${tagCounts().length ? `<select id="pickTag" aria-label="Filtrer par étiquette">
-        <option value="">🏷 Toutes</option>
-        ${tagCounts().map(([t,n]) => `<option value="${esc(t)}">${esc(t)} (${n})</option>`).join('')}
-      </select>` : ''}
-    </div>
-    <div id="pickList" style="max-height:48vh;overflow-y:auto"></div>
+    ${recFiltersHtml('pick', 'Rechercher…')}
+    <div class="pickinfo" id="pickInfo"></div>
+    <div id="pickList" class="picklist"></div>
     <div class="foot">
       <button class="btn ghost" data-act="closemodal">Fermer</button>
       <button class="btn" id="pickNew">+ Nouvelle recette</button>
     </div>
   `);
+  $('#sheet').classList.add('tall');
   const paint = () => {
-    const q = ($('#pickQ').value||'').trim().toLowerCase();
-    const tag = $('#pickTag') ? $('#pickTag').value : '';
-    let list = state.recipes.slice().sort((a,b)=>a.name.localeCompare(b.name,'fr'));
-    if(q) list = list.filter(r => textHit(r.name, q) || (r.ingredients||[]).some(i => textHit(i.name, q)));
-    if(tag) list = list.filter(r => (r.tags||[]).includes(tag));
-    $('#pickList').innerHTML = list.length ? list.map(r=>`
-      <div class="rec" style="margin-bottom:8px" data-act="doplan" data-id="${r.id}">
-        <h3>${esc(r.name)}</h3>
-        <div class="meta"><span>⏱ ${r.duration} min</span>${(r.tags||[]).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}${already.includes(r.id)?'<span class="pill">déjà prévu</span>':''}</div>
-      </div>`).join('')
-      : `<div class="empty">${state.recipes.length ? 'Aucune recette ne correspond.' : 'Aucune recette pour l’instant.'}<br><span class="muted">Tu peux en créer une avec « + Nouvelle recette ».</span></div>`;
+    const list = applyRecFilters(state.recipes.slice().sort((a,b)=>a.name.localeCompare(b.name,'fr')), pickF);
+    $('#pickInfo').innerHTML = state.recipes.length ? recCountHtml(list.length, pickF) : '';
+    $('#pickList').innerHTML = list.length
+      ? `<div class="pgrid">${list.map(r => recCard(r, 'doplan', already.includes(r.id) ? '<span class="pc-flag">déjà prévu</span>' : '')).join('')}</div>`
+      : recEmptyHtml(pickF);
+    $$('#pickList .rcard').forEach(c => c.classList.toggle('planned', already.includes(c.dataset.id)));
   };
-  $('#pickQ').addEventListener('input', paint);
-  if($('#pickTag')) $('#pickTag').addEventListener('change', paint);
+  pickerCtx.repaint = () => { paintRecFilters('pick', pickF); paint(); };
+  bindRecFilters('pick', pickF, paint);
   /* nouvelle recette : ajoutée directement à ce créneau une fois créée */
   $('#pickNew').addEventListener('click', ()=> openRecipeForm(null, { plan:{ dateKey, slot }, name:$('#pickQ').value.trim() }));
   paint();
@@ -4347,8 +4395,10 @@ document.addEventListener('click', e=>{
       store.save(); paintIngredients(); toast('« ' + n + ' » retiré de la liste'); break;
     }
     case 'deling': t.closest('.ingline').remove(); break;
-    case 'ftag': filterTag = t.dataset.tag || null; renderRecipes(); break;
-    case 'ftagall': filterTag = t.dataset.tag || null; closeModal(); renderRecipes(); window.scrollTo({ top:0 }); break;
+    case 'rfclear':                                    // « effacer les filtres » (onglet Recettes ou choix pour le calendrier)
+      if(t.closest('#sheet')){ recFiltersClear(pickF); if(pickerCtx && pickerCtx.repaint) pickerCtx.repaint(); }
+      else { recFiltersClear(recF); renderRecipes(); }
+      break;
     case 'closemodal': closeModal(); break;
     case 'look': closeMenu(); openLook(); break;
     case 'lookset': {
@@ -4460,7 +4510,6 @@ $$('nav.tabs button').forEach(b=>{
     b.classList.add('on');
     $$('.view').forEach(v=>v.classList.remove('on'));
     $('#v-' + b.dataset.v).classList.add('on');
-    if(b.dataset.v === 'rec') clampTags();         // les étiquettes se mesurent une fois l'onglet visible
     if(b.dataset.v === 'search'){ paintPubChips(); if(!pubQ.loaded && !pubQ.busy) pubSearch(true); else paintPub(); }
     if(b.dataset.v === 'cal') scrollToToday();   // calendrier : directement sur le jour actuel
     else window.scrollTo({top:0});
@@ -4581,9 +4630,7 @@ $('#weekToCart').addEventListener('click', ()=>{
 /* --- recettes --- */
 $('#newRec').addEventListener('click', ()=> openRecipeForm(null));
 $('#friendRecBtn').addEventListener('click', openFriendRecipes);
-$('#qRec').addEventListener('input', renderRecipes);
-$('#moreTags').addEventListener('click', openAllTags);
-addEventListener('resize', clampTags);
+$('#recFilters').innerHTML = recFiltersHtml('rec', 'Rechercher…'); bindRecFilters('rec', recF, renderRecipes);
 
 /* --- courses --- */
 function addManual(){
