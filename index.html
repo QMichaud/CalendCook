@@ -2417,7 +2417,7 @@ function weekIngredients(y, w){
   const chosen = recipes.filter(r => !impOff.has(r.id));
   const groups = {};
   chosen.forEach(r => (r.ingredients||[]).forEach(i=>{
-    const unit = i.unit || '';
+    const unit = i.unit === 'pcs' ? '' : (i.unit || '');   // « pièce » et sans unité : la même chose (4 œufs + 2 œufs)
     const k = i.name.trim().toLowerCase() + '|' + unit;     // 200 g et 1 botte ne s'additionnent pas
     if(!groups[k]) groups[k] = { name:i.name.trim(), qty:0, unit, src:new Set() };
     groups[k].qty = Math.round((groups[k].qty + (Number(i.qty)||0)) * 100) / 100;
@@ -3042,6 +3042,7 @@ function parseIngLine(raw){
   s = s.split(/\s*,\s*|\s+ou\s+|\s+pour\s+|\s*:\s*/)[0].trim();                  // « tomates, coupées en dés » → tomates
   if(!s) return [];
   if(pw && !unit){ qty = Number(pw[1].replace(',', '.')); unit = pw[2].toLowerCase(); factor = 1; }
+  if(qty !== '' && !unit) unit = 'pcs';                                          // « 4 œufs » : 4 pièces
   if(qty !== '') qty = Math.round(qty * factor * 1000) / 1000;
   const m = impMatch(s);   // exact : nom identique ; sinon raccourci (« lait de coco » → Lait) : à vérifier
   return [{ name: m ? m.k : ingTidy(s), qty, unit, ok: !!m, exact: !!(m && m.exact) && !vague, raw: String(raw || '').trim() }];
