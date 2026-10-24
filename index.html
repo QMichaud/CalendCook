@@ -2417,7 +2417,7 @@ function weekIngredients(y, w){
   const chosen = recipes.filter(r => !impOff.has(r.id));
   const groups = {};
   chosen.forEach(r => (r.ingredients||[]).forEach(i=>{
-    const unit = i.unit || '';
+    const unit = i.unit === 'pcs' ? '' : (i.unit || '');   // « pièce » et sans unité : la même chose (4 œufs + 2 œufs)
     const k = i.name.trim().toLowerCase() + '|' + unit;     // 200 g et 1 botte ne s'additionnent pas
     if(!groups[k]) groups[k] = { name:i.name.trim(), qty:0, unit, src:new Set() };
     groups[k].qty = Math.round((groups[k].qty + (Number(i.qty)||0)) * 100) / 100;
@@ -2905,9 +2905,9 @@ const ING_SECTIONS = [
     'Anchois|Bar|Cabillaud|Calamar|Colin|Crevette|Dorade|Lieu noir|Maquereau|Merlu|Moule|Noix de Saint-Jacques|Poisson blanc|' +
     'Sardine|Saumon|Saumon fumé|Sole|Surimi|Thon|Truite'],
   ['Crèmerie et frais',
-    'Beurre|Beurre demi-sel|Crème fraîche|Crème liquide|Crème épaisse|Lait|Fromage blanc|Fromage frais|Petit-suisse|Yaourt|' +
+    'Beurre|Beurre demi-sel|Crème fraîche|Crème liquide|Crème épaisse|Crème fleurette|Lait|Fromage blanc|Fromage frais|Petit-suisse|Yaourt|' +
     'Yaourt grec|Mascarpone|Mozzarella|Parmesan|Ricotta|Comté|Emmental|Gruyère|Fromage râpé|Chèvre|Feta|Roquefort|Camembert|' +
-    'Brie|Reblochon|Fromage à raclette|Cheddar|Œuf|Jaune d’œuf|Blanc d’œuf|Tofu|Pâte brisée|Pâte feuilletée|Pâte sablée|' +
+    'Brie|Reblochon|Halloumi|Fromage à raclette|Cheddar|Œuf|Jaune d’œuf|Blanc d’œuf|Tofu|Pâte brisée|Pâte feuilletée|Pâte sablée|' +
     'Pâte à pizza|Gnocchi|Ravioli'],
   ['Boulangerie',
     'Pain|Pain de mie|Baguette|Pain à burger|Pain pita|Tortilla|Biscotte'],
@@ -3042,6 +3042,7 @@ function parseIngLine(raw){
   s = s.split(/\s*,\s*|\s+ou\s+|\s+pour\s+|\s*:\s*/)[0].trim();                  // « tomates, coupées en dés » → tomates
   if(!s) return [];
   if(pw && !unit){ qty = Number(pw[1].replace(',', '.')); unit = pw[2].toLowerCase(); factor = 1; }
+  if(qty !== '' && !unit) unit = 'pcs';                                          // « 4 œufs » : 4 pièces
   if(qty !== '') qty = Math.round(qty * factor * 1000) / 1000;
   const m = impMatch(s);   // exact : nom identique ; sinon raccourci (« lait de coco » → Lait) : à vérifier
   return [{ name: m ? m.k : ingTidy(s), qty, unit, ok: !!m, exact: !!(m && m.exact) && !vague, raw: String(raw || '').trim() }];
@@ -3060,12 +3061,26 @@ function impServings(list){
    (introduction, astuces…) est renvoyé à part pour que rien ne soit perdu. */
 const TXT_HEAD_ING  = /^(?:les\s+)?(?:ingr[ée]dients?|ingredienti)\b/i;
 const TXT_HEAD_STEP = /^(?:la\s+)?(?:pr[ée]paration|r[ée]alisation|[ée]tapes?|instructions?|m[ée]thode|progression|d[ée]roul[ée]|recette|come fare|preparazione|procedimento|directions?|method)\b/i;
-const TXT_HEAD_NOTE = /^(?:l['’]\s*)?(?:astuces?|conseils?|notes?|essentiel|variantes?|bon à savoir|à savoir|le petit plus|suggestions?|tips?|info(?:rmation)?s?)\b/i;
+const TXT_HEAD_NOTE = /^(?:l['’]\s*)?(?:astuces?|conseils?|notes?|essentiel|variantes?|bon à savoir|à savoir|le petit plus|suggestions?|tips?|info(?:rmation)?s?|id[ée]es?|conservation|à l['’]avance|pr[ée]parez à l['’]avance)\b/i;
+/* rubrique en capitales suivie de son texte : « ASTUCES Utilisez… », « CONSERVATION La sauce se garde… » */
+const TXT_NOTE_INLINE = /^(?:ASTUCES?|CONSEILS?|NOTES?|ESSENTIEL|VARIANTES?|SUGGESTIONS?|ID[ÉE]ES?|CONSERVATION|BON À SAVOIR|LE PETIT PLUS|INFOS?)\b\s*:?\s+\S/;
+/* ustensiles : jamais des ingrédients (« 8 alvéoles d'un moule », « 1 plaque de cuisson »…) */
+const TXT_UTENSIL = /^(?:(?:petite?s?|grande?s?|gros(?:se)?s?|beaux?|belles?)\s+)?(?:alvéoles?|plaques?(?:\s+(?:de\s+cuisson|du\s+four|à\s+pâtisserie))?(?!\s+(?:de|d['’]))|plats?(?!\s+(?:de|d['’]))|poêles?|casseroles?|sauteuses?|cocottes?|saladiers?|bols?(?!\s+(?:de|d['’]))|jattes?|culs?-de-poule|fouets?|couteaux?|mandolines?|cercles?|emporte-pièces?|caissettes?|ramequins?|moules?\s+(?:à|de\s+\d|pour|en|rond|carré|rectangulaire|antiadhésif)|fours?|mixeurs?|robots?|blenders?|thermomètres?|poches?\s+à\s+douille|papier\s+(?:cuisson|sulfurisé|absorbant)|feuilles?\s+de\s+papier|films?\s+alimentaires?|torchons?|grilles?|tamis|passoires?|écumoires?|spatules?|rouleaux?\s+à\s+pâtisserie|pichets?|shakers?|bocaux?|boîtes?\s+hermétiques?)(?![a-zà-ÿ])/i;
 const TXT_UNIT = '(?:g|gr|kg|mg|ml|cl|dl|l|c\\.?\\s*à\\s*[sc]\\.?|cuil\\S*\\.?\\s*à\\s*(?:soupe|café|cafe)|pincées?|gousses?|tranches?|sachets?|bo[iî]tes?|bottes?|bouquets?|zestes?|pots?|verres?|feuilles?|brins?)';
 const TXT_QTY_ONLY = new RegExp('^x?\\s*(\\d+(?:[.,]\\d+)?|[½¼¾])\\s*(' + TXT_UNIT + ')?\\.?$', 'i');
 const TXT_REVERSED = new RegExp('^([^\\d½¼¾].*?)\\s+x?\\s*(\\d+(?:[.,]\\d+)?|[½¼¾])\\s*(' + TXT_UNIT + ')?\\.?$', 'i');
 const TXT_QB = /^(.+?)\s+(?:qb|q\.\s?b\.|qs|q\.\s?s\.|à volonté|selon (?:le |votre )?goût|au goût)$/i;
 const TXT_STEP_NUM = /^(?:(?:étape|etape|step)\s*)?(\d{1,2})\s*[.)\/–-]\s*(?=\S)(.*)$/i;
+/* étape numérotée sans ponctuation : « 1 Préchauffez le four… », « 3 Dans un grand pichet, battez… » */
+const TXT_STEP_WORD = /^(?:[A-ZÀ-Ý][a-zà-ÿ'’-]*ez|Faites|Mettez|Dans|Pendant|Pour|Puis|Ensuite|Quand|Lorsque|Une|Au|Aux|À|Si|Sur|Avec|Laissez|Versez|Servez|Retirez|Ajoutez|Coupez|Égouttez)\b/;
+const txtUtensil = line => TXT_UTENSIL.test(String(line).replace(/^(\d+(?:[.,]\d+)?|[½¼¾⅓⅔])\s*(?:x\s*)?/i, '').replace(/^(?:de |d['’]|du |des |un |une |l['’])/i, ''));
+function txtStep(l){
+  const a = l.match(TXT_STEP_NUM);
+  if(a && /^[A-ZÀ-Ý]/.test(a[2]) && l.length > 15) return a[2].trim();
+  const b = l.match(/^(?:(?:étape|etape|step)\s*)?(\d{1,2})\s+(?=[A-ZÀ-Ý])(.*)$/i);
+  if(b && TXT_STEP_WORD.test(b[2]) && b[2].split(/\s+/).length >= 3) return b[2].trim();
+  return null;
+}
 const txtCaps = l => { const a = l.replace(/[^A-Za-zÀ-ÿ]/g, ''); return a.length >= 3 && a === a.toUpperCase() && l.split(/\s+/).length <= 6; };
 const txtProse = l => /^[A-ZÀ-Ý]/.test(l) && (l.split(/\s+/).length >= 7 || (/[.!?]$/.test(l) && l.length > 25));   // une phrase commence par une majuscule
 function txtFixOcr(l){
@@ -3081,14 +3096,18 @@ function parseRecipeText(text){
   for(const l of lines){
     const prev = joined[joined.length - 1];
     if(prev && prev.length > 40 && !/[.!?:;]$/.test(prev) && /^[a-zà-ÿ]/.test(l) && !TXT_QTY_ONLY.test(l)) joined[joined.length - 1] = prev + ' ' + l;
+    else if(prev && !/[.!?:;,]$/.test(prev) && /^\d+\s+[a-zà-ÿ]/.test(l) && !txtStep(l)
+      && (txtStep(prev) || TXT_NOTE_INLINE.test(prev)) && prev.split(/\s+/).length >= 3) joined[joined.length - 1] = prev + ' ' + l;
     else joined.push(l);
   }
   lines = joined;
-  const numbered = lines.filter(l => TXT_STEP_NUM.test(l) && /^[A-ZÀ-Ý]/.test(l.replace(TXT_STEP_NUM, '$2')) && l.length > 15).length >= 2;
+  const numbered = lines.filter(l => txtStep(l)).length >= 2;
   const out = { name:'', yield:[], ingredients:[], orig:[], steps:[], unused:[] };
   let mode = 'none', lastIng = -1, pending = null, curStep = -1;
   const ingOk = l => { const r = parseIngLine(l); return r.length > 0 && r.every(x => x.ok); };
-  const addIng = (str, orig) => { out.ingredients.push(str); out.orig.push(orig); lastIng = out.ingredients.length - 1; };
+  const addIng = (str, orig) => {
+    if(txtUtensil(str)){ out.unused.push(orig); lastIng = -1; return; }           // ustensile : mis de côté
+    out.ingredients.push(str); out.orig.push(orig); lastIng = out.ingredients.length - 1; };
   const flushPending = () => { if(pending){ if(ingOk(pending)) addIng(pending, pending); else out.unused.push(pending); pending = null; } };
   lines.forEach((l, idx) => {
     const bare = l.replace(/\s*:$/, '');
@@ -3105,11 +3124,14 @@ function parseRecipeText(text){
       if(m && !out.yield.length){ out.yield.push(m[1]); flushPending(); if(mode === 'none' || mode === 'notes') mode = 'ing'; return; }
       if(txtCaps(l) || /:$/.test(l)){ flushPending(); mode = 'ing'; lastIng = -1; return; }       // « POUR LA GARNITURE »
     }
-    if(txtCaps(bare) && !/\d/.test(bare) && !ingOk(bare)){ flushPending(); return; }            // autre titre en capitales
+    /* rubrique en capitales suivie de son texte : mise de côté, comme ce qui suit */
+    if(TXT_NOTE_INLINE.test(l)){ flushPending(); out.unused.push(l); mode = 'notes'; lastIng = -1; return; }
+    /* autre titre en capitales (« SAUCE À LA MOUTARDE ») : un seul mot peut être un ingrédient (« SEL ») */
+    if(txtCaps(bare) && !/\d/.test(bare) && (bare.split(/\s+/).length > 1 || !ingOk(bare))){ flushPending(); if(mode !== 'steps') mode = 'ing'; lastIng = -1; return; }
     /* étape numérotée */
-    const sn = l.match(TXT_STEP_NUM);
-    if(numbered && sn && /^[A-ZÀ-Ý]/.test(sn[2]) && l.length > 15){
-      flushPending(); out.steps.push(sn[2].trim()); curStep = out.steps.length - 1; mode = mode === 'ing' ? 'ing' : 'steps'; lastIng = -1; return;
+    const sn = numbered && txtStep(l);
+    if(sn){
+      flushPending(); out.steps.push(sn); curStep = out.steps.length - 1; mode = mode === 'ing' ? 'ing' : 'steps'; lastIng = -1; return;
     }
     /* quantité seule, qui complète la ligne précédente : « Jambon de Parme » + « x 16 tranches » */
     if(TXT_QTY_ONLY.test(l)){
@@ -3119,6 +3141,9 @@ function parseRecipeText(text){
       else out.unused.push(l);
       return;
     }
+    /* « Sauce à la moutarde Mélangez les ingrédients… » : étape à part pour la sous-recette */
+    const sub = numbered && curStep >= 0 && mode !== 'notes' && l.match(/^([A-ZÀ-Ý][a-zà-ÿ'’ -]{3,40}?)\s+([A-ZÀ-Ý][a-zà-ÿ'’-]*ez\b.*)$/);
+    if(sub && sub[1].split(/\s+/).length <= 6){ flushPending(); out.steps.push(sub[1].trim() + ' : ' + sub[2]); curStep = out.steps.length - 1; lastIng = -1; return; }
     /* prose : étape, ou texte d'introduction / note */
     if(txtProse(l)){
       flushPending();
@@ -3126,6 +3151,10 @@ function parseRecipeText(text){
       else if(numbered){ out.steps[curStep] += ' ' + l; }
       else { out.steps.push(l); curStep = out.steps.length - 1; }
       lastIng = -1; return;
+    }
+    /* courte phrase après une étape numérotée (« Retirez du feu. ») : suite de cette étape */
+    if(numbered && curStep >= 0 && mode !== 'notes' && /^[A-ZÀ-Ý]/.test(l) && /[.!?]$/.test(l) && !/^\d/.test(l)){
+      flushPending(); out.steps[curStep] += ' ' + l; lastIng = -1; return;
     }
     /* suite de la ligne d'ingrédient précédente : « 1 cuil. à soupe de cumin » + « en poudre » */
     if(lastIng >= 0 && /^(?:en|de|d['’]|du|des|à|au|aux|bien|très)\b/i.test(l) && l.split(/\s+/).length <= 4){
@@ -4030,7 +4059,7 @@ function openRecipeForm(id, opts = {}){
     if(d.duration > 0) $('#rDur').value = d.duration;
     const n = impServings(d.yield); if(n){ $('#rServ').value = n; servBase = null; paintIngFor(false); }
     if(d.url || url){ $('#rUrl').value = d.url || url; $('#rUrlErr').textContent = ''; }
-    const lines = (d.ingredients || []).flatMap(parseIngLine);
+    const lines = (d.ingredients || []).filter(x => !txtUtensil(x)).flatMap(parseIngLine);
     if(lines.length){
       $('#ingWrap').innerHTML = lines.map(l => ingredientRow(l.name, l.qty, l.unit)).join('');
       $$('#ingWrap .ingline').forEach((row, i) => {
