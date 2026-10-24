@@ -913,6 +913,8 @@ const UNITS = [
   {k:'sachet',  l:'sachet'},
   {k:'boite',   l:'boîte'},
   {k:'botte',   l:'botte'},
+  {k:'bouquet', l:'bouquet'},  // herbes
+  {k:'zeste',   l:'zeste'},    // agrumes
   {k:'',    l:'—'}          // aucune unité (ex. « 2 œufs »)
 ];
 
@@ -927,7 +929,7 @@ function qtyLabel(q, u){
 /* ---------- quantités recalculées pour un autre nombre de personnes ----------
    arrondies pour rester lisibles : à la demi-unité pour ce qui se compte (œufs, gousses,
    cuillères…), à 2 chiffres significatifs pour les poids et volumes (5 en 5 au-delà de 100) */
-const COUNT_UNITS = new Set(['', 'pcs', 'tranche', 'gousse', 'pincee', 'sachet', 'boite', 'botte', 'cc', 'cs']);
+const COUNT_UNITS = new Set(['', 'pcs', 'tranche', 'gousse', 'pincee', 'sachet', 'boite', 'botte', 'bouquet', 'zeste', 'cc', 'cs']);
 function scaleQty(q, u, f){
   const v = Number(q); if(q === '' || q === null || q === undefined || !(v > 0)) return q;   // « selon le goût » : reste vide
   if(f === 1) return v;
@@ -2985,10 +2987,11 @@ const IMP_UNITS = [
   [/^(?:c\.?\s*(?:à|a)\s*soupe|c\.?\s*à\s*s\.?|c\.?\s*a\s*s\.?|cs|càs|cas|cuil(?:l(?:è|e)re)?s?\.?\s*à\s*soupe|cuil(?:l(?:è|e)re)?s?\.?\s*a\s*soupe)(?=\s|$|,|\.|\))/, 'cs', 1],
   [/^(?:c\.?\s*(?:à|a)\s*caf(?:é|e)|c\.?\s*à\s*c\.?|c\.?\s*a\s*c\.?|cc|càc|cac|cuil(?:l(?:è|e)re)?s?\.?\s*à\s*café|cuil(?:l(?:è|e)re)?s?\.?\s*a\s*cafe)(?=\s|$|,|\.|\))/, 'cc', 1],
   [/^pinc(?:é|e)es?\b/, 'pincee', 1], [/^gousses?\b/, 'gousse', 1], [/^tranches?\b/, 'tranche', 1],
-  [/^sachets?\b/, 'sachet', 1], [/^bo(?:î|i)tes?\b/, 'boite', 1], [/^bottes?\b/, 'botte', 1]
+  [/^sachets?\b/, 'sachet', 1], [/^bo(?:î|i)tes?\b/, 'boite', 1], [/^bottes?\b/, 'botte', 1],
+  [/^bouquets?\b/, 'bouquet', 1], [/^zestes?\b/, 'zeste', 1]
 ];
 /* mesures sans équivalent dans l'appli : la quantité est laissée vide (le texte d'origine reste visible) */
-const IMP_VAGUE = /^(?:verres?|tasses?|bols?|pots?|paquets?|poign(?:é|e)es?|brins?|branches?|feuilles?|filets?|traits?|noix|noisettes?|zestes?|morceaux?|louches?|barquettes?|cubes?|rouleaux?|doses?|petits? morceaux?)\b/;
+const IMP_VAGUE = /^(?:verres?|tasses?|bols?|pots?|paquets?|poign(?:é|e)es?|brins?|branches?|feuilles?|filets?|traits?|noix|noisettes?|morceaux?|louches?|barquettes?|cubes?|rouleaux?|doses?|petits? morceaux?)\b/;
 const IMP_FRAC = { '½':0.5, '¼':0.25, '¾':0.75, '⅓':0.33, '⅔':0.67, '⅛':0.125 };
 function impNum(t){
   t = t.replace(',', '.');
@@ -3058,7 +3061,7 @@ function impServings(list){
 const TXT_HEAD_ING  = /^(?:les\s+)?(?:ingr[ée]dients?|ingredienti)\b/i;
 const TXT_HEAD_STEP = /^(?:la\s+)?(?:pr[ée]paration|r[ée]alisation|[ée]tapes?|instructions?|m[ée]thode|progression|d[ée]roul[ée]|recette|come fare|preparazione|procedimento|directions?|method)\b/i;
 const TXT_HEAD_NOTE = /^(?:l['’]\s*)?(?:astuces?|conseils?|notes?|essentiel|variantes?|bon à savoir|à savoir|le petit plus|suggestions?|tips?|info(?:rmation)?s?)\b/i;
-const TXT_UNIT = '(?:g|gr|kg|mg|ml|cl|dl|l|c\\.?\\s*à\\s*[sc]\\.?|cuil\\S*\\.?\\s*à\\s*(?:soupe|café|cafe)|pincées?|gousses?|tranches?|sachets?|bo[iî]tes?|bottes?|pots?|verres?|feuilles?|brins?)';
+const TXT_UNIT = '(?:g|gr|kg|mg|ml|cl|dl|l|c\\.?\\s*à\\s*[sc]\\.?|cuil\\S*\\.?\\s*à\\s*(?:soupe|café|cafe)|pincées?|gousses?|tranches?|sachets?|bo[iî]tes?|bottes?|bouquets?|zestes?|pots?|verres?|feuilles?|brins?)';
 const TXT_QTY_ONLY = new RegExp('^x?\\s*(\\d+(?:[.,]\\d+)?|[½¼¾])\\s*(' + TXT_UNIT + ')?\\.?$', 'i');
 const TXT_REVERSED = new RegExp('^([^\\d½¼¾].*?)\\s+x?\\s*(\\d+(?:[.,]\\d+)?|[½¼¾])\\s*(' + TXT_UNIT + ')?\\.?$', 'i');
 const TXT_QB = /^(.+?)\s+(?:qb|q\.\s?b\.|qs|q\.\s?s\.|à volonté|selon (?:le |votre )?goût|au goût)$/i;
