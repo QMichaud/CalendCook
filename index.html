@@ -2454,7 +2454,7 @@ function renderImport(){
     <div class="tagbox" style="margin:0 0 10px">${uniq.map(r=>{ const on = !impOff.has(r.id);
       return `<button class="tagpick imprec${on?' on':''}" data-act="imptoggle" data-id="${r.id}" aria-pressed="${on}">${on?'✓ ':''}${esc(r.name)}</button>`; }).join('')}</div>
     ${keys.length ? `<div style="max-height:220px;overflow-y:auto;border:1px solid var(--line);border-radius:12px;padding:4px 10px;background:var(--sheet)">
-      ${keys.map(k=>`<div class="ingrow"><span style="flex:1">${esc(groups[k].name)}</span><span class="q">${esc(qtyLabel(groups[k].qty, groups[k].unit))}</span></div>`).join('')}
+      ${keys.map(k=>`<div class="ingrow"><span style="flex:1">${esc(groups[k].name)}</span><span class="q">${esc(qtyLabel(groups[k].qty || '', groups[k].unit))}</span></div>`).join('')}
     </div>` : `<div class="empty" style="padding:14px">${chosen.length ? 'Ces recettes n’ont pas d’ingrédients renseignés.' : 'Aucune recette sélectionnée.'}</div>`}
     <div class="row" style="margin-top:12px;gap:8px">
       <button class="btn sm" style="flex:1" data-act="import" data-mode="add"${keys.length?'':' disabled'}>Ajouter à ma liste</button>
@@ -3096,6 +3096,7 @@ function impMatch(name){
 function parseIngLine(raw){
   let s = String(raw || '').replace(/\s+/g, ' ').trim();
   s = s.replace(/[½¼¾⅓⅔⅛]/g, (c, i) => (i > 0 && /\d/.test(s[i - 1]) ? ' ' : '') + IMP_FRAC[c]);
+  s = s.replace(/^(\d+)\s+(0\.\d+)(?=\s|$)/, (m, a, b) => String(Number(a) + Number(b)));   // « 1 ½ » → 1.5
   const pw = s.match(/\((?:env\.?\s*|environ\s*)?(\d+(?:[.,]\d+)?)\s*(g|kg|ml|cl|l)\)/i);   // poids entre parenthèses
   s = s.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
   let qty = '', unit = '', factor = 1, vague = false;
