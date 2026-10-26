@@ -1636,12 +1636,13 @@ function openProfile(first){
     <div class="avfield">
       <span class="avprev${curAv ? ' ph-wait' : ''}" id="avPrev" data-photo-box>${curAv ? `<img data-photo="${esc(curAv)}" data-bucket="avatars" alt="">` : AVATAR_ICON}</span>
       <div class="avbtns">
-        <label class="btn ghost sm" for="avCam" id="avCamBtn">📷 Appareil photo</label>
-        <label class="btn ghost sm" for="avFile" id="avPick">🖼 Galerie</label>
+        ${IS_ANDROID ? `<label class="btn ghost sm" for="avCam" id="avCamBtn">📷 Appareil photo</label>
+        <label class="btn ghost sm" for="avFile" id="avPick">🖼 Galerie</label>`
+        : `<label class="btn ghost sm" for="avFile" id="avPick">📷 ${curAv ? 'Changer la photo' : 'Ajouter une photo'}</label>`}
         <button type="button" class="btn line sm" id="avDel"${curAv ? '' : ' hidden'}>Retirer</button>
         <div class="muted phmsg" id="avMsg"></div>
       </div>
-      <input type="file" id="avCam" accept="image/*" capture="user" class="vh">
+      ${IS_ANDROID ? '<input type="file" id="avCam" accept="image/*" capture="user" class="vh">' : ''}
       <input type="file" id="avFile" accept="image/*" class="vh">
     </div>
     <label class="f">Pseudo</label>
@@ -1665,17 +1666,19 @@ function openProfile(first){
         const pv = $('#avPrev'); pv.classList.remove('ph-wait', 'ph-gone');
         pv.innerHTML = `<img src="${URL.createObjectURL(avNew)}" alt="">`;
         $('#avDel').hidden = false;
+        if(!IS_ANDROID) $('#avPick').textContent = '📷 Changer la photo';
       }catch(e){ if($('#psErr')) $('#psErr').textContent = e.message + '.'; }
       finally{ photoBusyMsg.set = null; msg(''); }
     })().finally(() => { if(avBusy === job) avBusy = null; });
   };
-  ['#avFile', '#avCam'].forEach(sel => $(sel).addEventListener('change', () => {
+  ['#avFile', '#avCam'].forEach(sel => $(sel) && $(sel).addEventListener('change', () => {
     const file = $(sel).files[0]; $(sel).value = ''; if(file) avPickFile(file);
   }));
   $('#avDel').addEventListener('click', () => {
     avNew = null; avDrop = !!curAv;
     $('#avPrev').classList.remove('ph-wait', 'ph-gone'); $('#avPrev').innerHTML = AVATAR_ICON;
     $('#avDel').hidden = true;
+    if(!IS_ANDROID) $('#avPick').textContent = '📷 Ajouter une photo';
   });
   const go = async ()=>{
     if(avBusy){ try{ await avBusy; }catch(e){} }         // photo encore en préparation
@@ -2792,6 +2795,9 @@ new MutationObserver(ms => ms.forEach(m => m.addedNodes.forEach(n => {
    (le type annoncé est parfois absent ou faux). Les photos HEIC/HEIF (iPhone, certains Android) ne sont
    pas lisibles par Chrome : elles sont converties dans le téléphone, avec une bibliothèque chargée
    seulement à ce moment-là. */
+/* Android n'affiche pas toujours le choix « appareil photo ou galerie » : deux boutons séparés.
+   Ailleurs (iPhone, ordinateur), un seul bouton : le système propose lui-même le choix. */
+const IS_ANDROID = /Android/i.test(navigator.userAgent || '');
 const HEIC_LIB = 'https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js';
 const photoBusyMsg = { set:null };                     // message « ⏳ … » pendant une étape longue
 async function readPhotoFile(file){
@@ -3929,10 +3935,11 @@ function openRecipeForm(id, opts = {}){
       ${photos.can() || hasPhoto(r) ? `<div class="phfield">
         <div class="phprev${hasPhoto(r) ? ' ph-wait' : ''}" id="phPrev" data-photo-box${hasPhoto(r) ? '' : ' hidden'}>${hasPhoto(r) ? `<img data-photo="${esc(r.photo.f)}" alt="">` : ''}</div>
         ${photos.can() ? `<div class="row phbtns">
-          <label class="btn ghost sm" for="phCam" id="phCamBtn">📷 Appareil photo</label>
-          <label class="btn ghost sm" for="phFile" id="phPick">🖼 Galerie</label>
+          ${IS_ANDROID ? `<label class="btn ghost sm" for="phCam" id="phCamBtn">📷 Appareil photo</label>
+          <label class="btn ghost sm" for="phFile" id="phPick">🖼 Galerie</label>`
+          : `<label class="btn ghost sm" for="phFile" id="phPick">📷 ${hasPhoto(r) ? 'Changer la photo' : 'Ajouter une photo'}</label>`}
           <button type="button" class="btn line sm" id="phDel"${hasPhoto(r) ? '' : ' hidden'}>Retirer</button></div>
-        <input type="file" id="phCam" accept="image/*" capture="environment" class="vh">
+        ${IS_ANDROID ? '<input type="file" id="phCam" accept="image/*" capture="environment" class="vh">' : ''}
         <input type="file" id="phFile" accept="image/*" class="vh">
         <div class="muted phmsg" id="phMsg"></div>
         <div class="err" id="phErr" style="min-height:0"></div>` : '<div class="muted">Connecte-toi pour changer la photo.</div>'}
@@ -4124,6 +4131,7 @@ function openRecipeForm(id, opts = {}){
         const prev = $('#phPrev'); prev.hidden = false; prev.classList.remove('ph-wait', 'ph-gone');
         prev.innerHTML = `<img src="${URL.createObjectURL(phNew.f)}" alt="">`;
         $('#phDel').hidden = false;
+        if(!IS_ANDROID) $('#phPick').textContent = '📷 Changer la photo';
       }catch(e){ if($('#phErr')) $('#phErr').textContent = e.message + '.'; }
       finally{ photoBusyMsg.set = null; msg(''); }
     })().finally(() => { if(phBusy === job) phBusy = null; });
@@ -4199,6 +4207,7 @@ function openRecipeForm(id, opts = {}){
   if($('#phDel')) $('#phDel').addEventListener('click', () => {
     phNew = null; phDrop = hasPhoto(r);
     $('#phPrev').hidden = true; $('#phPrev').innerHTML = ''; $('#phDel').hidden = true;
+    if(!IS_ANDROID) $('#phPick').textContent = '📷 Ajouter une photo';
 
   });
   const form = $('#recForm');
