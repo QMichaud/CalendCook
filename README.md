@@ -27,3 +27,8 @@ L'onglet **« Depuis un texte »** fonctionne sans rien installer : on colle le 
 (copié depuis une note, un message, ou la photo d'un livre de cuisine) et l'application repère
 le nombre de personnes, les ingrédients et les étapes. Ce qui n'est pas utilisé (introduction,
 astuces…) reste consultable sous les ingrédients.
+
+## Tests automatiques
+
+Le dossier [`tests/`](tests/README.md) contient des tests qui ouvrent l'application dans un
+navigateur simulé (sans toucher aux vraies données) : `cd tests && npm install && npm test`.
