@@ -330,10 +330,33 @@
   .phmsg{font-size:13px;margin-top:6px}
   .phmsg:empty{display:none}
   .vh{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none}
-  #phDel[hidden]{display:none}
+  #phDel[hidden],#phEdit[hidden]{display:none}
   .lightbox{position:fixed;inset:0;z-index:70;background:rgba(15,18,28,.92);display:flex;align-items:center;justify-content:center;
     padding:calc(12px + env(safe-area-inset-top,0px)) 12px calc(12px + var(--safe));animation:fade .15s ease;cursor:zoom-out}
   .lightbox img{max-width:100%;max-height:100%;object-fit:contain;border-radius:4px}
+  /* ajuster une photo : pivoter, recadrer */
+  .phed{position:fixed;inset:0;z-index:75;background:#14171f;display:flex;flex-direction:column;
+    padding:calc(12px + env(safe-area-inset-top)) 16px calc(14px + env(safe-area-inset-bottom));color:#fff;animation:fade .15s ease}
+  .phed-t{font-weight:800;font-size:17px;text-align:center}
+  .phed-h{font-size:12.5px;opacity:.75;text-align:center;margin-top:3px}
+  .phed-stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;margin:12px 0}
+  .phed-img{position:relative;touch-action:none;user-select:none;-webkit-user-select:none;overflow:hidden}
+  .phed-img canvas{display:block;width:100%;height:100%}
+  .phed-crop{position:absolute;box-shadow:0 0 0 9999px rgba(0,0,0,.55);outline:2px solid #fff;outline-offset:-2px;cursor:move;
+    background-image:linear-gradient(rgba(255,255,255,.35),rgba(255,255,255,.35)),linear-gradient(rgba(255,255,255,.35),rgba(255,255,255,.35)),
+      linear-gradient(90deg,rgba(255,255,255,.35),rgba(255,255,255,.35)),linear-gradient(90deg,rgba(255,255,255,.35),rgba(255,255,255,.35));
+    background-size:100% 1px,100% 1px,1px 100%,1px 100%;background-position:0 33.33%,0 66.66%,33.33% 0,66.66% 0;background-repeat:no-repeat}
+  .phed-crop.round{border-radius:50%}
+  .phed-crop i{position:absolute;width:30px;height:30px;border:0 solid #fff}
+  .phed-crop i[data-h="nw"]{left:0;top:0;border-width:4px 0 0 4px;cursor:nwse-resize}
+  .phed-crop i[data-h="ne"]{right:0;top:0;border-width:4px 4px 0 0;cursor:nesw-resize}
+  .phed-crop i[data-h="sw"]{left:0;bottom:0;border-width:0 0 4px 4px;cursor:nesw-resize}
+  .phed-crop i[data-h="se"]{right:0;bottom:0;border-width:0 4px 4px 0;cursor:nwse-resize}
+  .phed-tools{display:flex;gap:8px;justify-content:center;margin-bottom:12px}
+  .phed-tools button{background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.3);border-radius:999px;
+    padding:9px 14px;font:inherit;font-size:14px;font-weight:700;cursor:pointer}
+  .phed .foot{display:flex;gap:10px;margin:0}
+  .phed .foot .btn{flex:1}
   .lb-x{position:absolute;top:calc(10px + env(safe-area-inset-top,0px));right:12px;width:44px;height:44px;border-radius:22px;border:0;
     background:rgba(255,255,255,.16);color:#fff;font-size:26px;line-height:1;cursor:pointer}
   .chip .tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:3px}
@@ -701,7 +724,7 @@
   .avprev.ph-gone{display:flex !important}
   .avbtns{display:flex;flex-direction:column;gap:7px;flex:1;min-width:0}
   #avPick{cursor:pointer}
-  #avDel[hidden]{display:none}
+  #avDel[hidden],#avEdit[hidden]{display:none}
   #friendRecBtn[hidden]{display:none}
   .origin{margin:-4px 0 12px;padding:8px 11px;border-radius:8px;background:var(--hl-soft);border:1px solid var(--hl-line);font-size:13.5px;color:var(--ink)}
   .shopitem .frbtns{display:flex;gap:6px;flex:none}
@@ -1639,6 +1662,7 @@ function openProfile(first){
         ${IS_ANDROID ? `<label class="btn ghost sm" for="avCam" id="avCamBtn">📷 Appareil photo</label>
         <label class="btn ghost sm" for="avFile" id="avPick">🖼 Galerie</label>`
         : `<label class="btn ghost sm" for="avFile" id="avPick">📷 ${curAv ? 'Changer la photo' : 'Ajouter une photo'}</label>`}
+        <button type="button" class="btn line sm" id="avEdit"${curAv ? '' : ' hidden'}>✂️ Ajuster</button>
         <button type="button" class="btn line sm" id="avDel"${curAv ? '' : ' hidden'}>Retirer</button>
         <div class="muted phmsg" id="avMsg"></div>
       </div>
@@ -1654,19 +1678,25 @@ function openProfile(first){
       <button class="btn" id="psOk">Enregistrer</button></div>`);
   /* photo : recadrée en carré et compressée tout de suite, envoyée à l'enregistrement */
   let avNew = null, avDrop = false, avBusy = null;
+  let avBase = null, avEd = { rot:0, crop:null };      // copie de travail et réglages (pivoter / recadrer en carré)
+  const avShow = () => {
+    const pv = $('#avPrev'); pv.classList.remove('ph-wait', 'ph-gone');
+    pv.innerHTML = `<img src="${URL.createObjectURL(avNew)}" alt="">`;
+    $('#avDel').hidden = false; $('#avEdit').hidden = false;
+    if(!IS_ANDROID) $('#avPick').textContent = '📷 Changer la photo';
+  };
   const avPickFile = file => {
     const msg = t => { if($('#avMsg')) $('#avMsg').textContent = t; };
     $('#psErr').textContent = ''; msg('⏳ Préparation de la photo…');
     const job = avBusy = (async () => {
       try{
         photoBusyMsg.set = msg;
-        const blob = await shrinkPhoto(file, 256, true);
+        const src = await photoSource(file);
+        const base = workCopy(src); if(src.close) src.close();
+        const blob = await shrinkFrom(base, 256, true);
         if(!$('#avPrev')) return;                      // fenêtre fermée pendant la préparation
-        avNew = blob; avDrop = false;
-        const pv = $('#avPrev'); pv.classList.remove('ph-wait', 'ph-gone');
-        pv.innerHTML = `<img src="${URL.createObjectURL(avNew)}" alt="">`;
-        $('#avDel').hidden = false;
-        if(!IS_ANDROID) $('#avPick').textContent = '📷 Changer la photo';
+        avBase = base; avEd = { rot:0, crop:null }; avNew = blob; avDrop = false;
+        avShow();
       }catch(e){ if($('#psErr')) $('#psErr').textContent = e.message + '.'; }
       finally{ photoBusyMsg.set = null; msg(''); }
     })().finally(() => { if(avBusy === job) avBusy = null; });
@@ -1674,10 +1704,25 @@ function openProfile(first){
   ['#avFile', '#avCam'].forEach(sel => $(sel) && $(sel).addEventListener('change', () => {
     const file = $(sel).files[0]; $(sel).value = ''; if(file) avPickFile(file);
   }));
+  /* ✂️ Ajuster : cadre carré (affiché en rond), rotation */
+  $('#avEdit').addEventListener('click', async () => {
+    if(avBusy){ try{ await avBusy; }catch(e){} }
+    $('#psErr').textContent = '';
+    try{
+      if(!avBase){ if(!curAv || avDrop) return; $('#avEdit').disabled = true; avBase = await workCopyOf(curAv, 'avatars'); avEd = { rot:0, crop:null }; }
+      const res = await editPhoto(avBase, avEd, { square:true, round:true });
+      if(!res || !$('#avPrev')) return;
+      if(res.rot === avEd.rot && JSON.stringify(res.crop) === JSON.stringify(avEd.crop)) return;   // rien de changé
+      $('#avEdit').disabled = true;
+      avEd = res; avNew = await shrinkFrom(applyEdit(avBase, avEd), 256, true); avDrop = false;
+      if($('#avPrev')) avShow();
+    }catch(e){ if($('#psErr')) $('#psErr').textContent = 'Ajustement impossible (' + e.message + ').'; }
+    finally{ if($('#avEdit')) $('#avEdit').disabled = false; }
+  });
   $('#avDel').addEventListener('click', () => {
-    avNew = null; avDrop = !!curAv;
+    avNew = null; avDrop = !!curAv; avBase = null;
     $('#avPrev').classList.remove('ph-wait', 'ph-gone'); $('#avPrev').innerHTML = AVATAR_ICON;
-    $('#avDel').hidden = true;
+    $('#avDel').hidden = true; $('#avEdit').hidden = true;
     if(!IS_ANDROID) $('#avPick').textContent = '📷 Ajouter une photo';
   });
   const go = async ()=>{
@@ -2913,19 +2958,113 @@ async function photoSource(file){
   if(photoBusyMsg.set) photoBusyMsg.set('⏳ Préparation…');
   return src;
 }
-/* photo d'une recette → { f: grande image, t: miniature carrée } prêtes à envoyer */
-async function preparePhoto(file){
-  const src = await photoSource(file);
-  const f = await shrinkFrom(src, PHOTO_MAX, false), t = await shrinkFrom(src, PHOTO_THUMB, true);
-  if(src.close) src.close();
-  return { f, t, ext: f.type === 'image/webp' ? '.webp' : '.jpg' };
+/* ---- ajuster une photo : pivoter de 90° et recadrer ----
+   On garde une copie de travail (≤ 2400 px) et les réglages { rot, crop } : chaque nouvel ajustement
+   repart de cette copie, sans perte de qualité. crop : rectangle (0 à 1) de l'image déjà pivotée. */
+const PHOTO_WORK = 2400;
+function workCopy(src){
+  const W = src.width || src.naturalWidth, H = src.height || src.naturalHeight, k = Math.min(1, PHOTO_WORK / Math.max(W, H));
+  const cv = document.createElement('canvas'); cv.width = Math.max(1, Math.round(W * k)); cv.height = Math.max(1, Math.round(H * k));
+  const cx = cv.getContext('2d'); cx.imageSmoothingQuality = 'high'; cx.drawImage(src, 0, 0, cv.width, cv.height);
+  return cv;
 }
-/* photo de profil : carré de taille « max » */
-async function shrinkPhoto(file, max, square){
-  const src = await photoSource(file);
-  const b = await shrinkFrom(src, max, square);
-  if(src.close) src.close();
-  return b;
+/* image pivotée (rot : nombre de quarts de tour, sens des aiguilles d'une montre) puis recadrée */
+function applyEdit(base, edit){
+  const W = base.width, H = base.height, r = (((edit && edit.rot) || 0) % 4 + 4) % 4;
+  const RW = r % 2 ? H : W, RH = r % 2 ? W : H, c = (edit && edit.crop) || { x:0, y:0, w:1, h:1 };
+  const sx = Math.round(c.x * RW), sy = Math.round(c.y * RH);
+  const sw = Math.max(1, Math.min(RW - sx, Math.round(c.w * RW))), sh = Math.max(1, Math.min(RH - sy, Math.round(c.h * RH)));
+  const cv = document.createElement('canvas'); cv.width = sw; cv.height = sh;
+  const cx = cv.getContext('2d'); cx.imageSmoothingQuality = 'high';
+  cx.translate(-sx, -sy); cx.translate(RW / 2, RH / 2); cx.rotate(r * Math.PI / 2); cx.drawImage(base, -W / 2, -H / 2);
+  return cv;
+}
+/* copie de travail d'une photo déjà enregistrée */
+async function workCopyOf(path, bucket){
+  const u = await photos.url(path, bucket);
+  const img = await new Promise((ok, ko) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => ko(new Error('photo illisible')); i.src = u; });
+  return workCopy(img);
+}
+/* fenêtre « Ajuster la photo » ; renvoie les nouveaux réglages, ou null (Annuler) */
+function editPhoto(base, edit, opts = {}){
+  return new Promise(done => {
+    let rot = (edit && edit.rot) || 0, crop = edit && edit.crop ? Object.assign({}, edit.crop) : null;
+    const ov = document.createElement('div'); ov.className = 'phed'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-label', 'Ajuster la photo');
+    ov.innerHTML = `<div class="phed-t">Ajuster la photo</div>
+      <div class="phed-h">Fais glisser le cadre ou ses coins pour recadrer</div>
+      <div class="phed-stage"><div class="phed-img"><canvas></canvas><div class="phed-crop${opts.round ? ' round' : ''}"><i data-h="nw"></i><i data-h="ne"></i><i data-h="sw"></i><i data-h="se"></i></div></div></div>
+      <div class="phed-tools"><button type="button" data-rot="-1" aria-label="Pivoter vers la gauche">⟲ 90°</button><button type="button" data-rot="1" aria-label="Pivoter vers la droite">⟳ 90°</button><button type="button" data-full>${opts.square ? 'Recentrer' : 'Photo entière'}</button></div>
+      <div class="foot"><button type="button" class="btn ghost" data-no>Annuler</button><button type="button" class="btn" data-ok>Valider</button></div>`;
+    document.body.appendChild(ov);
+    const stage = ov.querySelector('.phed-stage'), box = ov.querySelector('.phed-img'), cv = box.querySelector('canvas'), fr = box.querySelector('.phed-crop');
+    let RW = 1, RH = 1, D = { w:1, h:1 };              // image pivotée (pixels) et affichée (pixels écran)
+    /* cadre par défaut : toute l'image, ou le plus grand carré centré */
+    const full = () => { if(!opts.square) return { x:0, y:0, w:1, h:1 };
+      const m = Math.min(RW, RH); return { x:(RW - m) / 2 / RW, y:(RH - m) / 2 / RH, w:m / RW, h:m / RH }; };
+    const paintFrame = () => {
+      fr.style.left = crop.x * D.w + 'px'; fr.style.top = crop.y * D.h + 'px';
+      fr.style.width = crop.w * D.w + 'px'; fr.style.height = crop.h * D.h + 'px';
+    };
+    const draw = () => {
+      const img = applyEdit(base, { rot });
+      RW = img.width; RH = img.height;
+      const mw = stage.clientWidth || 300, mh = stage.clientHeight || 300, k = Math.min(mw / RW, mh / RH);
+      D = { w:Math.max(1, Math.round(RW * k)), h:Math.max(1, Math.round(RH * k)) };
+      box.style.width = D.w + 'px'; box.style.height = D.h + 'px';
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      cv.width = Math.round(D.w * dpr); cv.height = Math.round(D.h * dpr);
+      const cx = cv.getContext('2d'); cx.imageSmoothingQuality = 'high'; cx.drawImage(img, 0, 0, cv.width, cv.height);
+      if(!crop) crop = full();
+      paintFrame();
+    };
+    /* glisser : déplacer le cadre, ou un coin pour le redimensionner (en pixels affichés) */
+    let drag = null;
+    box.addEventListener('pointerdown', e => {
+      if(!e.target.closest('.phed-crop')) return;
+      e.preventDefault();
+      drag = { h:e.target.dataset.h || '', x0:e.clientX, y0:e.clientY, c:{ x:crop.x * D.w, y:crop.y * D.h, w:crop.w * D.w, h:crop.h * D.h } };
+      try{ box.setPointerCapture(e.pointerId); }catch(err){}
+    });
+    box.addEventListener('pointermove', e => {
+      if(!drag) return;
+      const dx = e.clientX - drag.x0, dy = e.clientY - drag.y0, c = drag.c, min = Math.min(48, D.w, D.h);
+      let { x, y, w, h } = c;
+      if(!drag.h){ x = Math.min(Math.max(0, c.x + dx), D.w - c.w); y = Math.min(Math.max(0, c.y + dy), D.h - c.h); }
+      else {
+        const L = drag.h.includes('w'), T = drag.h.includes('n');
+        /* coin opposé fixe */
+        const ax = L ? c.x + c.w : c.x, ay = T ? c.y + c.h : c.y;
+        let nw = Math.max(min, Math.min(L ? ax : D.w - ax, c.w + (L ? -dx : dx)));
+        let nh = Math.max(min, Math.min(T ? ay : D.h - ay, c.h + (T ? -dy : dy)));
+        if(opts.square){ const m = Math.min(Math.max(nw, nh), L ? ax : D.w - ax, T ? ay : D.h - ay); nw = nh = m; }
+        w = nw; h = nh; x = L ? ax - w : ax; y = T ? ay - h : ay;
+      }
+      crop = { x:x / D.w, y:y / D.h, w:w / D.w, h:h / D.h };
+      paintFrame();
+    });
+    const end = () => { drag = null; };
+    box.addEventListener('pointerup', end); box.addEventListener('pointercancel', end);
+    const close = val => { removeEventListener('resize', onResize); ov.remove(); done(val); };
+    const onResize = () => draw();
+    addEventListener('resize', onResize);
+    ov.addEventListener('click', e => {
+      const b = e.target.closest('button'); if(!b) return;
+      if(b.dataset.rot){ rot = ((rot + Number(b.dataset.rot)) % 4 + 4) % 4; crop = null; draw(); }
+      else if(b.dataset.full !== undefined){ crop = full(); paintFrame(); }
+      else if(b.dataset.no !== undefined) close(null);
+      else if(b.dataset.ok !== undefined){
+        const whole = crop.x < .002 && crop.y < .002 && crop.w > .996 && crop.h > .996;
+        close({ rot, crop: whole ? null : crop });
+      }
+    });
+    requestAnimationFrame(draw);
+  });
+}
+/* photo de recette prête à envoyer, à partir de la copie de travail et des réglages */
+async function prepFromWork(base, edit){
+  const src = applyEdit(base, edit);
+  const f = await shrinkFrom(src, PHOTO_MAX, false), t = await shrinkFrom(src, PHOTO_THUMB, true);
+  return { f, t, ext: f.type === 'image/webp' ? '.webp' : '.jpg' };
 }
 /* envoie une photo préparée pour une recette du foyer affiché */
 async function uploadPhoto(prep, id){
@@ -3988,6 +4127,7 @@ function openRecipeForm(id, opts = {}){
           ${IS_ANDROID ? `<label class="btn ghost sm" for="phCam" id="phCamBtn">📷 Appareil photo</label>
           <label class="btn ghost sm" for="phFile" id="phPick">🖼 Galerie</label>`
           : `<label class="btn ghost sm" for="phFile" id="phPick">📷 ${hasPhoto(r) ? 'Changer la photo' : 'Ajouter une photo'}</label>`}
+          <button type="button" class="btn line sm" id="phEdit"${hasPhoto(r) ? '' : ' hidden'}>✂️ Ajuster</button>
           <button type="button" class="btn line sm" id="phDel"${hasPhoto(r) ? '' : ' hidden'}>Retirer</button></div>
         ${IS_ANDROID ? '<input type="file" id="phCam" accept="image/*" capture="environment" class="vh">' : ''}
         <input type="file" id="phFile" accept="image/*" class="vh">
@@ -4168,6 +4308,13 @@ function openRecipeForm(id, opts = {}){
   if(!r && opts.name) $('#rName').value = opts.name;
   /* photo : préparée (compressée) au choix, envoyée seulement à l'enregistrement */
   let phNew = null, phDrop = false, phBusy = null;      // phBusy : préparation en cours (attendue à l'enregistrement)
+  let phBase = null, phEd = { rot:0, crop:null };       // copie de travail et réglages (pivoter / recadrer)
+  const showPhoto = () => {
+    const prev = $('#phPrev'); prev.hidden = false; prev.classList.remove('ph-wait', 'ph-gone');
+    prev.innerHTML = `<img src="${URL.createObjectURL(phNew.f)}" alt="">`;
+    $('#phDel').hidden = false; $('#phEdit').hidden = false;
+    if(!IS_ANDROID) $('#phPick').textContent = '📷 Changer la photo';
+  };
   const pickPhoto = file => {
     if(!$('#phPick')) return;
     const msg = t => { if($('#phMsg')) $('#phMsg').textContent = t; };
@@ -4175,13 +4322,12 @@ function openRecipeForm(id, opts = {}){
     const job = phBusy = (async () => {
       try{
         photoBusyMsg.set = msg;
-        const prep = await preparePhoto(file);
+        const src = await photoSource(file);
+        const base = workCopy(src); if(src.close) src.close();
+        const ed = { rot:0, crop:null }, prep = await prepFromWork(base, ed);
         if(!$('#phPrev')) return;                      // formulaire fermé pendant la préparation
-        phNew = prep; phDrop = false;
-        const prev = $('#phPrev'); prev.hidden = false; prev.classList.remove('ph-wait', 'ph-gone');
-        prev.innerHTML = `<img src="${URL.createObjectURL(phNew.f)}" alt="">`;
-        $('#phDel').hidden = false;
-        if(!IS_ANDROID) $('#phPick').textContent = '📷 Changer la photo';
+        phBase = base; phEd = ed; phNew = prep; phDrop = false;
+        showPhoto();
       }catch(e){ if($('#phErr')) $('#phErr').textContent = e.message + '.'; }
       finally{ photoBusyMsg.set = null; msg(''); }
     })().finally(() => { if(phBusy === job) phBusy = null; });
@@ -4254,9 +4400,28 @@ function openRecipeForm(id, opts = {}){
   if($('#iuFromUrl')) $('#iuFromUrl').addEventListener('click', () => runImport($('#rUrl').value, $('#iuFromUrl'), $('#iuMsg2')));
   wrap.addEventListener('input', e => e.target.classList.remove('approx'));
   wrap.addEventListener('ingpicked', e => e.target.classList.remove('approx'));
+  /* ✂️ Ajuster : pivoter / recadrer la nouvelle photo, ou celle déjà enregistrée */
+  if($('#phEdit')) $('#phEdit').addEventListener('click', async () => {
+    if(phBusy){ try{ await phBusy; }catch(e){} }
+    const btn = $('#phEdit'); $('#phErr').textContent = '';
+    try{
+      if(!phBase){
+        if(!hasPhoto(r) || phDrop) return;
+        btn.disabled = true;
+        phBase = await workCopyOf(r.photo.f); phEd = { rot:0, crop:null };
+      }
+      const res = await editPhoto(phBase, phEd);
+      if(!res || !$('#phPrev')) return;
+      if(res.rot === phEd.rot && JSON.stringify(res.crop) === JSON.stringify(phEd.crop)) return;   // rien de changé
+      btn.disabled = true;
+      phEd = res; phNew = await prepFromWork(phBase, phEd); phDrop = false;
+      if($('#phPrev')) showPhoto();
+    }catch(e){ if($('#phErr')) $('#phErr').textContent = 'Ajustement impossible (' + e.message + ').'; }
+    finally{ if($('#phEdit')) $('#phEdit').disabled = false; }
+  });
   if($('#phDel')) $('#phDel').addEventListener('click', () => {
-    phNew = null; phDrop = hasPhoto(r);
-    $('#phPrev').hidden = true; $('#phPrev').innerHTML = ''; $('#phDel').hidden = true;
+    phNew = null; phDrop = hasPhoto(r); phBase = null;
+    $('#phPrev').hidden = true; $('#phPrev').innerHTML = ''; $('#phDel').hidden = true; $('#phEdit').hidden = true;
     if(!IS_ANDROID) $('#phPick').textContent = '📷 Ajouter une photo';
 
   });
