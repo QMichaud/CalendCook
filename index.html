@@ -2052,6 +2052,51 @@ async function switchFoyer(f){
   await cloud.start();
   if(cloud.foyer === f){ toast('Foyer « ' + f + ' »'); scrollToToday(); }
 }
+/* copie d'une recette dans un autre de mes foyers (sans passer par « Recherche ») */
+function openToFoyer(id){
+  const r = findRecipe(id); if(!r) return;
+  const others = cloud.foyers.filter(f => f !== cloud.foyer);
+  openModal(`
+    <h2>Copier dans un autre foyer</h2>
+    <div class="muted">Une copie de « ${esc(r.name)} » sera ajoutée aux recettes du foyer choisi. Elle y sera privée, et la recette d’ici ne change pas.</div>
+    <div class="card" style="padding:4px 12px;box-shadow:none;margin:12px 0 0">${others.map(f => `<button class="menu-i" data-act="copyfoyer" data-id="${esc(id)}" data-foyer="${esc(f)}"><span class="menu-ck">🏠</span><span class="menu-t">${esc(f)}</span></button>`).join('')}</div>
+    <div class="err" id="cpErr"></div>
+    <div class="foot"><button class="btn ghost" data-act="openrec" data-id="${esc(id)}">‹ Retour</button></div>`);
+}
+async function copyToFoyer(id, to){
+  const r = findRecipe(id); if(!r || !to || to === cloud.foyer || !cloud.foyers.includes(to)) return;
+  const btns = $$('#sheet [data-act="copyfoyer"]'); btns.forEach(b => b.disabled = true);
+  let ph = null;
+  try{
+    const c = clone(r); c.id = uid(); delete c.public;      // privée dans l'autre foyer, jusqu'à ce qu'on la publie là-bas
+    delete c.photo;
+    if(hasPhoto(r)){ ph = await photos.copyTo(r.photo, to, c.id); if(ph) c.photo = ph; }   // photo dans le dossier de l'autre foyer
+    for(let attempt = 0; ; attempt++){
+      if(attempt === 4) throw new Error('trop d’enregistrements simultanés, réessaie');
+      const rows = await db('recettes_app?select=data,updated_at&id=eq.' + encodeURIComponent(to));
+      const row = rows && rows[0];
+      const data = Object.assign(EMPTY(), row && row.data);
+      if(attempt === 0 && (data.recipes || []).some(x => x && accentKey(x.name || '') === accentKey(r.name))
+         && !confirm('« ' + to + ' » a déjà une recette « ' + r.name + ' ». La copier quand même ?')){ if(ph) photos.remove([ph.f, ph.t]); ph = null; return; }
+      data.recipes = (data.recipes || []).concat(c);
+      const stamp = new Date().toISOString();
+      if(row){                                              // seulement si personne n'a écrit entre-temps
+        const res = await db('recettes_app?id=eq.' + encodeURIComponent(to) + '&updated_at=eq.' + encodeURIComponent(row.updated_at), {
+          method:'PATCH', headers:{ Prefer:'return=representation' }, body: JSON.stringify({ data, updated_at:stamp }) });
+        if(!res || !res.length) continue;
+      } else {
+        await db('recettes_app', { method:'POST', headers:{ Prefer:'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify([{ id:to, data, updated_at:stamp }]) });
+      }
+      break;
+    }
+    ph = null;
+    openRecipe(id); toast('« ' + r.name + ' » copiée dans « ' + to + ' »');
+  }catch(e){
+    if(ph) photos.remove([ph.f, ph.t]);
+    if($('#cpErr')) $('#cpErr').textContent = 'Copie impossible : ' + e.message;
+  }finally{ btns.forEach(b => b.disabled = false); }
+}
 /* après avoir quitté / supprimé le foyer affiché : on passe à un autre foyer (ou à aucun) */
 async function afterFoyerGone(){
   cloud.on = false; cloud.pending = false; cloud.foyer = '';
@@ -2920,6 +2965,7 @@ function openRecipe(id){
         <div class="menu" id="recMenu" hidden>
           <button class="menu-i" data-act="editrec" data-id="${r.id}"><span class="menu-ck">✏️</span><span class="menu-t">Modifier</span></button>
           <button class="menu-i" data-act="planfrom" data-id="${r.id}"><span class="menu-ck">📅</span><span class="menu-t">Planifier</span></button>
+          ${cloud.on && cloud.foyers.length > 1 ? `<button class="menu-i" data-act="tofoyer" data-id="${r.id}"><span class="menu-ck">🏠</span><span class="menu-t">Copier dans un autre foyer</span></button>` : ''}
           <div class="menu-sep"></div>
           <button class="menu-i danger" data-act="delrec" data-id="${r.id}"><span class="menu-ck"><svg class="trash-i" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></span><span class="menu-t">Supprimer la recette</span></button>
         </div></div></div>
@@ -3849,6 +3895,9 @@ pubQ.names = {};
 /* ---- fiche d'une recette publique ---- */
 const pubItem = pid => pubQ.items.find(x => x.pid === pid);
 const importedPub = pid => state.recipes.some(x => x.origin && x.origin.pub === pid);
+/* x.mienne (serveur) : publiée par un de mes foyers. Elle n'est « de ce foyer » que si elle est
+   dans le foyer ouvert ; depuis un autre de mes foyers, on peut l'y ajouter (mais pas la noter) */
+const inThisFoyer = x => !!(x.mienne && x.data && state.recipes.some(r => r.id === String(x.data.id)));
 function openPubRecipe(pid){
   const x = pubItem(pid); if(!x) return;
   const r = x.data, ings = (Array.isArray(r.ingredients) ? r.ingredients : []).filter(i => i && i.name);
@@ -3861,7 +3910,7 @@ function openPubRecipe(pid){
       <div class="pubmenu-w"><button class="pubdots" data-act="pubmenu" aria-label="Plus d’options" aria-haspopup="true">⋯</button>
         <div class="menu" id="pubMenu" hidden><button class="menu-i danger" data-act="pubreport" data-pid="${esc(pid)}"><span class="menu-ck">🚩</span><span class="menu-t">Signaler cette recette</span></button></div></div></div>
     <div class="author">${av ? `<span class="mini-av ph-wait" data-photo-box data-ini="${esc(who.charAt(0).toUpperCase())}"><img data-photo="${esc(av)}" data-bucket="avatars" alt=""></span>` : `<span class="mini-av none">${esc(who.charAt(0).toUpperCase())}</span>`}
-      <div><b>${esc(who)}</b><small>Recette publique${x.mienne ? ' · de ton foyer' : ''}</small></div></div>
+      <div><b>${esc(who)}</b><small>Recette publique${inThisFoyer(x) ? ' · de ton foyer' : x.mienne ? ' · d’un de tes foyers' : ''}</small></div></div>
     <div class="rating">${x.nb_notes ? `${starsHtml(x.note, 'big')}<b>${String(x.note).replace('.', ',')}</b><span class="muted">(${x.nb_notes} avis)</span>` : '<span class="nonote">Pas encore de note</span>'}
       ${x.nb_imports ? `<span class="pill">📥 ${x.nb_imports} import${x.nb_imports > 1 ? 's' : ''}</span>` : ''}</div>
     <div class="row" style="gap:6px;margin:8px 0 12px;flex-wrap:wrap">
@@ -3877,7 +3926,7 @@ function openPubRecipe(pid){
     ${stepsHtml(typeof r.steps === 'string' ? r.steps : '')}
     <div class="foot">
       <button class="btn ghost" style="flex:1" data-act="closemodal">‹ Retour</button>
-      ${x.mienne ? '<button class="btn" style="flex:1" disabled>Recette de ton foyer</button>'
+      ${inThisFoyer(x) ? '<button class="btn" style="flex:1" disabled>Recette de ton foyer</button>'
         : done ? '<button class="btn" style="flex:1" disabled>✓ Déjà dans mes recettes</button>'
         : `<button class="btn" style="flex:1" data-act="pubimport" data-pid="${esc(pid)}">📥 Ajouter à mes recettes</button>`}
     </div>`);
@@ -4452,6 +4501,8 @@ document.addEventListener('click', e=>{
     case 'openrec': openRecipe(id); break;
     case 'editrec': openRecipeForm(id); break;
     case 'planfrom': openSlotPicker(id); break;
+    case 'tofoyer': openToFoyer(id); break;
+    case 'copyfoyer': copyToFoyer(id, t.dataset.foyer); break;
     case 'delrec': {
       const rr = findRecipe(id);
       if(!confirm('Supprimer « ' + (rr ? rr.name : 'cette recette') + ' » ? Elle sera aussi retirée du calendrier.')) break;
@@ -4573,7 +4624,7 @@ document.addEventListener('click', e=>{
       break;
     }
     case 'pubimport': {
-      const x = pubItem(t.dataset.pid); if(!x || x.mienne || importedPub(x.pid)) break;
+      const x = pubItem(t.dataset.pid); if(!x || inThisFoyer(x) || importedPub(x.pid)) break;
       const copy = cleanPublicRecipe(x);
       state.recipes.push(copy); store.save(); render();
       toast('« ' + copy.name + ' » ajoutée à tes recettes');
