@@ -42,6 +42,7 @@ Chaque vérification affiche ✓ ou ✗ ; le résumé final indique le nombre d�
 | `photos.test.js` | Android (appareil photo / galerie), iPhone (un seul bouton), photos HEIC, fichiers illisibles, photo de profil |
 | `apparence.test.js` | couleur des boutons et du fond, gardées sur l’appareil |
 | `fusion.test.js` | fusion des modifications faites en même temps sur deux appareils, synchronisation avec le foyer |
+| `foyers.test.js` | plusieurs foyers : copier une recette dans un autre de mes foyers, recette publique d’un de mes foyers ajoutée depuis un autre |
 | `publiques.test.js` | critères pour publier, pseudo obligatoire, onglet Recherche, ajout d’une recette publique |
 | `sql.test.js` | `supabase_setup.sql` exécuté deux fois sur un PostgreSQL local jetable, droits d’accès et fonctions (foyers, pseudos, recettes publiques, notes). Ignoré si PostgreSQL n’est pas installé (`PG_BIN=/chemin/bin` pour l’indiquer) |
 

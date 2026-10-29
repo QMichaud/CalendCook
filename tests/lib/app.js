@@ -42,7 +42,8 @@ function fakeSupabase(opts = {}){
       pseudos_connus: () => [{ email: opts.email || 'moi@x.fr', pseudo: opts.pseudo === undefined ? 'Moi' : opts.pseudo, avatar: null }],
       mes_amis: () => [], recettes_amis: () => [], mes_publications: () => [], chercher_recettes: () => []
     }, opts.rpc || {}),
-    fn: opts.fn || {}                                     // fonctions « edge » : db.fn['import-recette'] = (corps) => …
+    fn: opts.fn || {},                                    // fonctions « edge » : db.fn['import-recette'] = (corps) => …
+    others: opts.others || {}                             // autres foyers de la personne : { nom: données }
   };
   db.route = async r => {
     const u = new URL(r.request().url()), m = r.request().method(), pth = decodeURIComponent(u.pathname);
@@ -64,9 +65,17 @@ function fakeSupabase(opts = {}){
       const out = await f(body(), r.request().headers());
       return json(out.body !== undefined ? out.body : out, out.status || 200);
     }
-    if(pth === '/rest/v1/foyer_membres') return json([{ foyer_id: db.foyer, email: db.email }]);
-    if(pth === '/rest/v1/recettes_app' && m === 'GET') return json([{ data: db.data, updated_at: 'x' }]);
-    if(pth === '/rest/v1/recettes_app' && (m === 'PATCH' || m === 'POST')){ db.data = body().data || db.data; return json([{}]); }
+    if(pth === '/rest/v1/foyer_membres') return json([db.foyer, ...Object.keys(db.others)].map(f => ({ foyer_id: f, email: db.email })));
+    if(pth === '/rest/v1/recettes_app'){
+      const f = (u.searchParams.get('id') || '').replace(/^eq\./, '') || db.foyer;
+      const other = f !== db.foyer;
+      if(m === 'GET'){ const d = other ? db.others[f] : db.data; return json(d ? [{ data: d, updated_at: 'x' }] : []); }
+      if(m === 'PATCH' || m === 'POST'){
+        const b = body(), d = (Array.isArray(b) ? b[0] : b).data;
+        if(other) db.others[f] = d; else db.data = d || db.data;
+        return json([{}]);
+      }
+    }
     if(pth.startsWith('/rest/v1/rpc/')){
       const name = pth.replace('/rest/v1/rpc/', ''), f = db.rpc[name];
       db.lastRpc = db.lastRpc || {}; db.lastRpc[name] = body();
