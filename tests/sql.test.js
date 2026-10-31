@@ -110,6 +110,23 @@ grant usage on schema storage to anon, authenticated; grant all on storage.objec
     t.check(/de 1 à 5/.test(as_('eve@x.fr', `select public.noter_recette('${pid}', 6)`)) && as_('alice@x.fr', `select nb_notes from public.chercher_recettes('ratatouille')`) === '2', 'note 6 refusée');
     as_('eve@x.fr', `select public.compter_import('${pid}')`); as_('eve@x.fr', `select public.compter_import('${pid}')`);
     t.check(as_('alice@x.fr', `select nb_imports from public.chercher_recettes('ratatouille')`) === '1', 'import compté une seule fois par personne');
+
+    t.section('5. Recettes de mes amis (Recherche → 👥 Mes amis)');
+    t.check(as_('postgres', `reset role; select count(*) from pg_proc where proname = 'chercher_recettes'`) === '1', 'une seule version de chercher_recettes (l’ancienne est remplacée)');
+    const amis = who => as_(who, `select count(*) from public.chercher_recettes(amis => true)`);
+    t.check(amis('eve@x.fr') === '0', 'Ève, pas encore amie : aucune recette');
+    as_('eve@x.fr', `select public.demander_ami('alice@x.fr')`);
+    t.check(amis('eve@x.fr') === '0', 'demande seulement envoyée : toujours rien');
+    t.check(as_('alice@x.fr', `select public.demander_ami('eve@x.fr')`) === 'accepte', 'Alice accepte');
+    t.check(amis('eve@x.fr') === '1' && as_('eve@x.fr', `select auteur_pseudo from public.chercher_recettes(q => 'ratatouille', amis => true)`) === 'Alice M', 'Ève voit la recette publique d’Alice');
+    t.check(amis('carl@x.fr') === '0' && as_('carl@x.fr', `select count(*) from public.chercher_recettes()`) === '1', 'Carl (pas ami) : rien dans « Mes amis », mais la recette reste dans « Toutes »');
+    as_('bob@x.fr', `select public.demander_ami('alice@x.fr')`); as_('alice@x.fr', `select public.demander_ami('bob@x.fr')`);
+    t.check(amis('bob@x.fr') === '0', 'Bob, ami d’Alice mais du même foyer : pas dans « Mes amis » (c’est déjà sa recette)');
+    t.check(as_('eve@x.fr', `select count(*) from public.chercher_recettes(amis => true, saison => 'hiver')`) === '0', 'les autres filtres s’appliquent aussi');
+    t.check(/permission denied/.test(as_(null, `select * from public.chercher_recettes(amis => true)`)), 'sans connexion : refusé');
+    as_('alice@x.fr', `select public.depublier_recette('Famille Martin', 'a')`);
+    t.check(amis('eve@x.fr') === '0', 'recette repassée en privée : elle disparaît de « Mes amis »');
+    as_('alice@x.fr', `select public.publier_recette('Famille Martin', ${rec({})}, 'ratatouille', '{courgette,aubergine,tomate}', '{ete}')`);
     t.check(/pseudo/.test(as_('alice@x.fr', `select public.definir_pseudo('')`)), 'pseudo obligatoire tant qu’une recette est publique');
     as_('alice@x.fr', `select public.depublier_recette('Famille Martin', 'a')`);
     t.check(as_('eve@x.fr', `select count(*) from public.chercher_recettes('')`) === '0', 'repassée en privée : plus visible');
