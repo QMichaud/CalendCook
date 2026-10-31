@@ -592,10 +592,13 @@ end;
 $$;
 
 -- recherche : mots (tous présents, dans le titre ou les ingrédients), ingrédients avec / sans,
--- note minimale, saison ; tri par pertinence (titre > ingrédients, puis note ajustée, puis imports)
+-- note minimale, saison ; tri par pertinence (titre > ingrédients, puis note ajustée, puis imports).
+-- amis = true : seulement les recettes des foyers de mes amis (hors foyers dont je suis membre)
+drop function if exists public.chercher_recettes(text, text[], text[], numeric, text, text, int);   -- ancienne version, sans « amis »
 create or replace function public.chercher_recettes(
   q text default '', avec text[] default '{}', sans text[] default '{}',
-  note_min numeric default 0, saison text default '', tri text default 'pertinence', page int default 0)
+  note_min numeric default 0, saison text default '', tri text default 'pertinence', page int default 0,
+  amis boolean default false)
 returns table (pid uuid, data jsonb, auteur_pseudo text, auteur_avatar text, note numeric, nb_notes int,
                nb_imports int, ma_note int, mienne boolean, saisons text[], total bigint)
 language sql stable security definer set search_path = public
@@ -619,6 +622,11 @@ as $$
        and not (p.ing_cles && coalesce(sans, '{}'))
        and (coalesce(saison, '') = '' or saison = any(p.saisons))
        and (coalesce(note_min, 0) <= 0 or (p.nb_notes > 0 and p.somme_notes::numeric / p.nb_notes >= note_min))
+       and (not coalesce(amis, false) or (
+             exists (select 1 from public.demandes_amis d
+                       join public.foyer_membres fa on fa.email = case when d.de = m.e then d.a else d.de end
+                      where d.statut = 'accepte' and (d.de = m.e or d.a = m.e) and fa.foyer_id = p.foyer_id)
+             and not exists (select 1 from public.foyer_membres moi where moi.foyer_id = p.foyer_id and moi.email = m.e)))
   )
   select b.pid, b.data, ps.pseudo, ps.avatar, b.moyenne, b.nb_notes, b.nb_imports,
          (select n.note from public.notes_publiques n, m where n.pid = b.pid and n.email = m.e),
@@ -739,7 +747,7 @@ create policy "avatars auteurs lecture" on storage.objects for select to authent
 
 revoke execute on function public.publier_recette(text, jsonb, text, text[], text[]) from anon, public;
 revoke execute on function public.depublier_recette(text, text, boolean)             from anon, public;
-revoke execute on function public.chercher_recettes(text, text[], text[], numeric, text, text, int) from anon, public;
+revoke execute on function public.chercher_recettes(text, text[], text[], numeric, text, text, int, boolean) from anon, public;
 revoke execute on function public.recette_publique(uuid)                             from anon, public;
 revoke execute on function public.noter_recette(uuid, int)                           from anon, public;
 revoke execute on function public.compter_import(uuid)                               from anon, public;
@@ -749,7 +757,7 @@ revoke execute on function public.photo_publique(text)                          
 revoke execute on function public.avatar_auteur_public(text)                         from anon, public;
 grant  execute on function public.publier_recette(text, jsonb, text, text[], text[]) to authenticated;
 grant  execute on function public.depublier_recette(text, text, boolean)             to authenticated;
-grant  execute on function public.chercher_recettes(text, text[], text[], numeric, text, text, int) to authenticated;
+grant  execute on function public.chercher_recettes(text, text[], text[], numeric, text, text, int, boolean) to authenticated;
 grant  execute on function public.recette_publique(uuid)                             to authenticated;
 grant  execute on function public.noter_recette(uuid, int)                           to authenticated;
 grant  execute on function public.compter_import(uuid)                               to authenticated;
